@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="DevEn.Xrm.EntityValidation.Tests/DevEn.Xrm.EntityValidation.Tests.csproj" />
+  <Project Path="DevEn.Xrm.EntityValidation/DevEn.Xrm.EntityValidation.csproj" />
+</Solution>

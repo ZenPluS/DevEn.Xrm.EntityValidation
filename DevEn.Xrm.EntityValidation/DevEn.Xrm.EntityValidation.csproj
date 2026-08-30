@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 4.6.2 is Microsoft's officially supported target framework for the Dataverse plugin sandbox worker process. -->
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>DevEn.Xrm.EntityValidation</AssemblyName>
+    <RootNamespace>DevEn.Xrm.EntityValidation</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <!-- Properties\AssemblyInfo.cs already provides these attributes; avoid CS0579 duplicate-attribute errors. -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project lives in a subfolder of this project: it must be explicitly excluded, otherwise
+         SDK-style's implicit glob would include it here too. -->
+    <Compile Remove="DevEn.Xrm.EntityValidation.Tests\**" />
+    <EmbeddedResource Remove="DevEn.Xrm.EntityValidation.Tests\**" />
+    <None Remove="DevEn.Xrm.EntityValidation.Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Runtime.Serialization" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>

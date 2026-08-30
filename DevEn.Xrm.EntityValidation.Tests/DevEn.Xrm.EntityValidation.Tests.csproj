@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>DevEn.Xrm.EntityValidation.Tests</RootNamespace>
+    <!-- FakeXrmEasy.9 (v1.x) is the free/MIT-licensed line compatible with .NET Framework; its upgrade path
+         (v2.x/v3.x) targets .NET (Core) and requires a commercial license, out of scope here. -->
+    <NoWarn>CS0618</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.6.4" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.6.4" />
+    <PackageReference Include="FakeXrmEasy.9" Version="1.58.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevEn.Xrm.EntityValidation\DevEn.Xrm.EntityValidation.csproj" />
+  </ItemGroup>
+
+</Project>
