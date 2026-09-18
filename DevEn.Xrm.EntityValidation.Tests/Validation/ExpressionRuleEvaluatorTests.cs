@@ -148,6 +148,26 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
         }
 
         [TestMethod]
+        public void IsValid_TwoOptionsFieldAgainstBooleanLiteral_IsComparable()
+        {
+            var entity = new Entity("account") { ["donotemail"] = true };
+
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""donotemail"",""op"":""=="",""value"":true}"));
+            Assert.IsFalse(Evaluate(entity, @"{""field"":""donotemail"",""op"":""=="",""value"":false}"));
+        }
+
+        [TestMethod]
+        public void IsValid_OptionSetAgainstNumericLiteral_ComparesTheOptionValue()
+        {
+            var entity = new Entity("account") { ["statuscode"] = new OptionSetValue(10) };
+
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""statuscode"",""op"":""=="",""value"":10}"));
+
+            // Compared as text, "10" would sort before "9".
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""statuscode"",""op"":"">"",""value"":9}"));
+        }
+
+        [TestMethod]
         public void IsValid_AbsentField_ReturnsTrue()
         {
             var entity = new Entity("account");

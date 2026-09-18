@@ -26,6 +26,10 @@ namespace DevEn.Xrm.EntityValidation.Validation
             {
                 comparisonResult = leftDate.CompareTo(rightDate);
             }
+            else if (leftRaw is bool leftBoolean && rightRaw is bool rightBoolean)
+            {
+                comparisonResult = leftBoolean.CompareTo(rightBoolean);
+            }
             else if (AttributeValueConverter.TryGetComparableTextStrict(leftRaw, out var leftText) && AttributeValueConverter.TryGetComparableTextStrict(rightRaw, out var rightText))
             {
                 comparisonResult = string.CompareOrdinal(leftText, rightText);

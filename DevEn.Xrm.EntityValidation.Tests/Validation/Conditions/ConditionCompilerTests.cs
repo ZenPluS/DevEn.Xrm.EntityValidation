@@ -68,6 +68,14 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation.Conditions
         }
 
         [TestMethod]
+        public void Compile_ArithmeticNextToField_IsRejectedAsAmbiguous()
+        {
+            var exception = CompileError(@"{""condition"":{""field"":""importo"",""multiply"":2,""op"":"">"",""value"":10}}");
+
+            StringAssert.Contains(exception.Message, "multiply");
+        }
+
+        [TestMethod]
         public void Compile_KeysAreCaseInsensitive()
         {
             var rule = TestRuleBuilder.Create(

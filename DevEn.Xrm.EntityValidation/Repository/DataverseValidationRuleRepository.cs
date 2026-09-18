@@ -205,23 +205,35 @@ namespace DevEn.Xrm.EntityValidation.Repository
                         $"Rule #{index} for entity '{targetEntityLogicalName}' is not a JSON object.");
                 }
 
-                if (!((bool?)item["isActive"] ?? true))
+                try
                 {
-                    continue;
+                    if (!((bool?)item["isActive"] ?? true))
+                    {
+                        continue;
+                    }
+
+                    var ruleId = (string)item["id"] ?? $"{targetEntityLogicalName}#{index}";
+
+                    rules.Add(new ValidationRuleDefinition(
+                        ruleId,
+                        targetEntityLogicalName,
+                        (string)item["message"],
+                        ParseStage((string)item["stage"], ruleId),
+                        (string)item["field"],
+                        (string)item["ruleType"],
+                        item["parameters"]?.ToString(Formatting.None),
+                        (string)item["errorMessage"],
+                        (int?)item["executionOrder"] ?? 0));
                 }
-
-                var ruleId = (string)item["id"] ?? $"{targetEntityLogicalName}#{index}";
-
-                rules.Add(new ValidationRuleDefinition(
-                    ruleId,
-                    targetEntityLogicalName,
-                    (string)item["message"],
-                    ParseStage((string)item["stage"], ruleId),
-                    (string)item["field"],
-                    (string)item["ruleType"],
-                    item["parameters"]?.ToString(Formatting.None),
-                    (string)item["errorMessage"],
-                    (int?)item["executionOrder"] ?? 0));
+                catch (ValidationConfigurationException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new ValidationConfigurationException(
+                        $"Rule #{index} for entity '{targetEntityLogicalName}' has a property of the wrong type: {ex.Message}", ex);
+                }
             }
 
             return rules;

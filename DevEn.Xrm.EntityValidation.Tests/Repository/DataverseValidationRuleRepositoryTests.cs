@@ -246,6 +246,22 @@ namespace DevEn.Xrm.EntityValidation.Tests.Repository
         }
 
         [TestMethod]
+        public void GetActiveRules_PropertyOfTheWrongType_IsReportedAsAConfigurationError()
+        {
+            var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
+            var rule = CreateRule("Create", "PreOperation", "name");
+            rule["executionOrder"] = "first";
+
+            var context = new XrmFakedContext();
+            context.Initialize(new List<Entity> { CreateConfigurationRow(entityName, new JArray { rule }) });
+
+            var repository = new DataverseValidationRuleRepository(context.GetOrganizationService(), new FakeTracingService(), Guid.NewGuid());
+
+            Assert.ThrowsException<ValidationConfigurationException>(
+                () => repository.GetActiveRules(entityName, "Create", PipelineStage.PreOperation));
+        }
+
+        [TestMethod]
         public void GetActiveRules_BrokenRuleForAnotherMessage_IsStillReportedAtLoadTime()
         {
             var entityName = "vldtest_" + Guid.NewGuid().ToString("N");

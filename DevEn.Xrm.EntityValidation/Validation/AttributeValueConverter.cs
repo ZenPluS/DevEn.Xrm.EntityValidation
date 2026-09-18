@@ -27,6 +27,9 @@ namespace DevEn.Xrm.EntityValidation.Validation
                 case Money money:
                     result = money.Value;
                     return true;
+                case OptionSetValue optionSet:
+                    result = optionSet.Value;
+                    return true;
                 case decimal dec:
                     result = dec;
                     return true;

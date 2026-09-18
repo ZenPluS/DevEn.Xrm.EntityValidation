@@ -192,8 +192,8 @@ plugin); an invalid pattern or a timeout throws `ValidationConfigurationExceptio
 
 ### Range
 
-`{"min": number, "max": number}` (both optional). Accepts `Money`, `decimal`, `int`, `long` and `double`
-fields; any other type throws `ValidationConfigurationException`.
+`{"min": number, "max": number}` (both optional). Accepts `Money`, `decimal`, `int`, `long`, `double` and
+choice columns (compared by their integer value); any other type throws `ValidationConfigurationException`.
 
 ```json
 { "message": "Update", "stage": "PreOperation", "field": "creditlimit", "ruleType": "Range",
@@ -226,8 +226,9 @@ that can't be converted to non-empty text throws.
 ### FieldComparison
 
 `{"compareToAttribute": "...", "operator": "Equal|NotEqual|GreaterThan|GreaterThanOrEqual|LessThan|LessThanOrEqual"}`.
-Supports numeric/numeric, date/date, or strict text/text (string or option set only) pairs; comparing
-incompatible types throws `ValidationConfigurationException` rather than silently succeeding.
+Supports number/number (a choice column compares by its integer value), date/date, boolean/boolean, or
+strict text/text pairs; comparing incompatible types throws `ValidationConfigurationException` rather than
+silently succeeding.
 
 ```json
 { "message": "Update", "stage": "PreOperation", "field": "estimatedclosedate", "ruleType": "FieldComparison",
@@ -270,7 +271,7 @@ A **comparison** takes a left side, an operator and a right-hand side:
 | `left` | Left side as an operand object, when it needs arithmetic |
 | `op` | `==`, `!=`, `>`, `>=`, `<`, `<=` — `=`, `<>` and `eq`/`ne`/`gt`/`gte`/`lt`/`lte` are accepted as aliases |
 | `value` | Right side as a literal **text, number or boolean** (never interpreted as a date) |
-| `date` | Right side as a date: ISO-8601 (`"2026-01-01"`) or a relative token (`"Today"`, `"Now"`, `"Today+30d"`, `"Today-1y"`, `"Today+6m"`) |
+| `date` | Right side as a date, evaluated in **UTC**: ISO-8601 (`"2026-01-01"`) or a relative token (`"Today"`, `"Now"`, `"Today+30d"`, `"Today-1y"`, `"Today+6m"`) |
 | `compareToField` | Right side as another attribute's logical name |
 | `compareTo` | Right side as an operand object, when it needs arithmetic |
 
@@ -288,10 +289,14 @@ The argument of an operation is either a literal (`"multiply": 1.1`) or another 
 
 Semantics:
 
-- Comparisons reuse the exact type-compatibility rules as `FieldComparison` (numeric/numeric, date/date, or
-  strict text/text); comparing incompatible types throws `ValidationConfigurationException`.
+- Comparisons reuse the exact type-compatibility rules as `FieldComparison`: number/number (a choice column
+  compares by its integer value, so `10 > 9` holds), date/date, boolean/boolean, or text/text; comparing
+  incompatible types throws `ValidationConfigurationException`.
 - If either side of a comparison is `null`/absent, that comparison is vacuously satisfied (`true`) —
   consistent with every other rule type's "absent field ⇒ satisfied" convention.
+- `not` inverts that vacuous `true` as well, so a negated comparison on an absent field **fails**. Wrap it
+  in an `any` group together with a presence check, or use a separate `Required` rule, if that isn't what
+  you mean.
 - Relative dates are resolved when the record is validated, not when the condition is compiled, so `Today`
   always means today.
 - Every key is matched case-insensitively (`"Field"` works as well as `"field"`), and nesting is capped at
@@ -302,6 +307,9 @@ Semantics:
   (`paesse` for `paese`) is reported as a configuration error instead of silently reading as "absent" and
   letting the rule pass forever. If metadata can't be read in that environment, the check is skipped rather
   than blocking.
+- Money columns compare by their raw amount, with no currency conversion: comparing two amounts held in
+  different currencies (or a transaction-currency column with a `_base` one) compares numbers that don't
+  mean the same thing. Pick both sides in the same currency.
 
 Two fields must match:
 
@@ -394,7 +402,8 @@ self-referential configuration mistake).
 
 `{"scopeFields": ["...", "..."]}` (optional). Runs a live query against Dataverse (in the calling user's
 security context) for other records of the same entity sharing this field's value; when updating an
-existing record, the record itself is excluded from the check. `scopeFields` narrows the check to records
+existing record, the record itself is excluded from the check (on the returned rows, not through a guessed
+`{entity}id` filter, which doesn't exist on activity tables). `scopeFields` narrows the check to records
 that also share the same value on those additional fields (e.g. "unique per parent account").
 
 ```json
@@ -484,10 +493,10 @@ The same plugin class is reused across every registration: "one or more generic 
   field type...) never pass silently, and never stop the pass at the first one either: every misconfigured
   rule is collected and they are all reported together, so an administrator fixes them in one round instead
   of one per save attempt. A configuration error takes precedence over validation messages (fail closed).
-- Rules that can be checked without a record (today: `Expression`) are checked **when the configuration is
-  loaded** — that is, for every message and stage at once — so a mistake in a rule that only applies to,
-  say, `Update`/`PostOperation` surfaces at the first save of any record of that entity instead of the
-  first time that specific rule happens to run.
+- Rules that can be checked without a record (today: `Expression`, and the inner rule of a `Conditional`)
+  are checked **when the configuration is loaded** — that is, for every message and stage at once — so a
+  mistake in a rule that only applies to, say, `Update`/`PostOperation` surfaces at the first save of any
+  record of that entity instead of the first time that specific rule happens to run.
 - The end user only sees a generic
   "The validation configuration for this record is not valid. Contact your system administrator." message:
   rule ids, field logical names, regex patterns and expression text stay in the server-side trace log.

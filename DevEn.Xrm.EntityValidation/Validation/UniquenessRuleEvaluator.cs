@@ -36,7 +36,7 @@ namespace DevEn.Xrm.EntityValidation.Validation
             var query = new QueryExpression(rule.TargetEntityLogicalName)
             {
                 ColumnSet = new ColumnSet(false),
-                TopCount = 1,
+                TopCount = 2,
                 NoLock = true
             };
             query.Criteria.AddCondition(rule.AttributeLogicalName, ConditionOperator.Equal, rawValue);
@@ -58,14 +58,19 @@ namespace DevEn.Xrm.EntityValidation.Validation
                 }
             }
 
-            if (effectiveEntity.Id != Guid.Empty)
+            // The record being updated is excluded here rather than in the query: the primary key isn't
+            // always "{entitylogicalname}id" (activities all use "activityid"), and a wrong attribute name
+            // would make the whole query fail. Two rows are enough to tell "only myself" from "someone else".
+            var result = organizationService.RetrieveMultiple(query);
+            foreach (var match in result.Entities)
             {
-                // Exclude the current record itself (relevant for Update: the record already exists).
-                query.Criteria.AddCondition(rule.TargetEntityLogicalName + "id", ConditionOperator.NotEqual, effectiveEntity.Id);
+                if (match.Id != effectiveEntity.Id)
+                {
+                    return false;
+                }
             }
 
-            var result = organizationService.RetrieveMultiple(query);
-            return result.Entities.Count == 0;
+            return true;
         }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json.Linq;
 using DevEn.Xrm.EntityValidation.Configuration;
 using DevEn.Xrm.EntityValidation.Model;
@@ -60,6 +61,8 @@ namespace DevEn.Xrm.EntityValidation.Validation.Conditions
                 { "subtractDays", ArithmeticOperator.SubtractDays },
                 { "differenceInDays", ArithmeticOperator.DifferenceInDays }
             };
+
+        private static readonly string[] ArithmeticOperatorKeys = ArithmeticOperators.Keys.ToArray();
 
         public static ConditionNode Compile(ValidationRuleDefinition rule)
         {
@@ -228,6 +231,12 @@ namespace DevEn.Xrm.EntityValidation.Validation.Conditions
 
             if (field != null)
             {
+                var strayOperation = FirstPresent(node, ArithmeticOperatorKeys);
+                if (strayOperation != null)
+                {
+                    throw Error(ruleId, path, $"'{strayOperation}' cannot sit next to 'field': move it inside a 'left' or 'compareTo' operand object.");
+                }
+
                 return CompileFieldOperand(field, ruleId, $"{path}.field");
             }
 

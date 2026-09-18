@@ -1,3 +1,4 @@
+using System;
 using DevEn.Xrm.EntityValidation.Configuration;
 using DevEn.Xrm.EntityValidation.Tests.TestHelpers;
 using DevEn.Xrm.EntityValidation.Validation;
@@ -113,6 +114,39 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
                 parametersJson: "{\"when\":{\"field\":\"accounttype\",\"operator\":\"Equal\",\"value\":\"Customer\"},\"then\":{\"ruleType\":\"DoesNotExist\"}}");
 
             Assert.ThrowsException<ValidationConfigurationException>(() => CreateEvaluator().IsValid(entity, rule, null));
+        }
+
+        private static void ValidateConfiguration(string parametersJson)
+        {
+            var rule = TestRuleBuilder.Create("Conditional", attributeLogicalName: "fieldA", parametersJson: parametersJson);
+            var context = new RuleConfigurationContext(FakeMetadataOrganizationService.Unavailable(), Guid.NewGuid(), new FakeTracingService());
+
+            ((IRuleConfigurationValidator)CreateEvaluator()).ValidateConfiguration(rule, context);
+        }
+
+        [TestMethod]
+        public void ValidateConfiguration_BrokenInnerRule_IsReportedWithoutWaitingForTheGateToOpen()
+        {
+            var exception = Assert.ThrowsException<ValidationConfigurationException>(() => ValidateConfiguration(
+                "{\"when\":{\"field\":\"accounttype\",\"operator\":\"Equal\",\"value\":\"Customer\"},"
+                + "\"then\":{\"ruleType\":\"Expression\",\"parameters\":{\"condition\":{\"field\":\"fieldA\",\"op\":\"equalz\",\"value\":\"X\"}}}}"));
+
+            StringAssert.Contains(exception.Message, "equalz");
+        }
+
+        [TestMethod]
+        public void ValidateConfiguration_InvalidWhenOperator_IsReportedAtLoadTime()
+        {
+            Assert.ThrowsException<ValidationConfigurationException>(() => ValidateConfiguration(
+                "{\"when\":{\"field\":\"accounttype\",\"operator\":\"Contains\",\"value\":\"Customer\"},\"then\":{\"ruleType\":\"Required\"}}"));
+        }
+
+        [TestMethod]
+        public void ValidateConfiguration_ValidRule_DoesNotThrow()
+        {
+            ValidateConfiguration(
+                "{\"when\":{\"field\":\"accounttype\",\"operator\":\"Equal\",\"value\":\"Customer\"},"
+                + "\"then\":{\"ruleType\":\"Expression\",\"parameters\":{\"condition\":{\"field\":\"fieldA\",\"op\":\"==\",\"value\":\"X\"}}}}");
         }
     }
 }
