@@ -57,6 +57,16 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation.Expressions
         }
 
         [TestMethod]
+        public void Tokenize_QuotedNonIsoText_StaysAString()
+        {
+            // Only ISO-8601 counts as a date here: a lenient parse would turn values like '1.5' into dates.
+            var tokens = ExpressionLexer.Tokenize("'1.5'", "test-rule");
+
+            Assert.AreEqual(ExpressionTokenKind.String, tokens[0].Kind);
+            Assert.AreEqual("1.5", tokens[0].Value);
+        }
+
+        [TestMethod]
         public void Tokenize_BareToday_ProducesDateLiteralToken()
         {
             var tokens = ExpressionLexer.Tokenize("Today", "test-rule");

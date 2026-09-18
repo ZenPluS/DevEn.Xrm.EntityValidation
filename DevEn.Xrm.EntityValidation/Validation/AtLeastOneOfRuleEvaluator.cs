@@ -9,8 +9,8 @@ namespace DevEn.Xrm.EntityValidation.Validation
     /// Checks that at least N of several fields are populated (e.g. "at least one of email/phone/mobile").
     /// Parameters: <c>{"fields": ["emailaddress1", "telephone1"], "minimumRequired": 1}</c>
     /// ("minimumRequired" optional, default 1). <see cref="Model.ValidationRuleDefinition.AttributeLogicalName"/>
-    /// is only used for tracing/default error messages here: put a descriptive label there (e.g. the
-    /// fields joined by ";"), since this rule isn't scoped to a single field.
+    /// is optional for this rule type and only used for tracing/default error messages: since the rule
+    /// isn't scoped to a single field, leave it empty or use it as a descriptive label.
     /// </summary>
     internal sealed class AtLeastOneOfRuleEvaluator : IRuleEvaluator
     {

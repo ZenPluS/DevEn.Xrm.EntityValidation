@@ -102,5 +102,37 @@ namespace DevEn.Xrm.EntityValidation.Tests.Engine
 
             StringAssert.Contains(exception.Message, "name");
         }
+
+        [TestMethod]
+        public void ValidateAndThrow_SeveralMisconfiguredRules_ReportsThemAllAtOnce()
+        {
+            var rules = new List<ValidationRuleDefinition>
+            {
+                TestRuleBuilder.Create("DoesNotExist"),
+                TestRuleBuilder.Create("Regex", parametersJson: "{}")
+            };
+            var engine = new ValidationEngine(new StubRepository(rules), RuleEvaluatorRegistry.CreateDefault(), new FakeTracingService(), null);
+            var entity = new Entity("account") { ["new_field"] = "value" };
+
+            var exception = Assert.ThrowsException<ValidationConfigurationException>(() =>
+                engine.ValidateAndThrow(entity, "account", "Create", PipelineStage.PreOperation));
+
+            StringAssert.Contains(exception.Message, "DoesNotExist");
+            StringAssert.Contains(exception.Message, "'pattern'");
+        }
+
+        [TestMethod]
+        public void ValidateAndThrow_MisconfiguredRuleAlongsideAFailingOne_FailsClosedOnTheConfiguration()
+        {
+            var rules = new List<ValidationRuleDefinition>
+            {
+                TestRuleBuilder.Create("Required", attributeLogicalName: "name", errorMessage: "The name is required."),
+                TestRuleBuilder.Create("DoesNotExist")
+            };
+            var engine = new ValidationEngine(new StubRepository(rules), RuleEvaluatorRegistry.CreateDefault(), new FakeTracingService(), null);
+
+            Assert.ThrowsException<ValidationConfigurationException>(() =>
+                engine.ValidateAndThrow(new Entity("account"), "account", "Create", PipelineStage.PreOperation));
+        }
     }
 }

@@ -22,10 +22,21 @@ namespace DevEn.Xrm.EntityValidation.Tests.Model
         }
 
         [TestMethod]
-        public void Constructor_MissingAttribute_Throws()
+        public void Constructor_MissingAttribute_IsAccepted()
         {
-            Assert.ThrowsException<ValidationConfigurationException>(() =>
-                new ValidationRuleDefinition("rule-1", "account", "Create", PipelineStage.PreOperation, " ", "Required", null, "msg", 0));
+            // Rule types whose fields live in the parameters (AtLeastOneOf, Expression) legitimately
+            // leave it empty: it's the evaluators that need a field which demand one.
+            var rule = new ValidationRuleDefinition("rule-1", "account", "Create", PipelineStage.PreOperation, " ", "Expression", null, "msg", 0);
+
+            Assert.AreEqual(" ", rule.AttributeLogicalName);
+        }
+
+        [TestMethod]
+        public void RequireAttributeLogicalName_MissingAttribute_Throws()
+        {
+            var rule = new ValidationRuleDefinition("rule-1", "account", "Create", PipelineStage.PreOperation, " ", "Required", null, "msg", 0);
+
+            Assert.ThrowsException<ValidationConfigurationException>(() => rule.RequireAttributeLogicalName());
         }
 
         [TestMethod]

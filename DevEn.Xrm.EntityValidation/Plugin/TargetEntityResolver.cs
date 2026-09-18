@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xrm.Sdk;
 using DevEn.Xrm.EntityValidation.Configuration;
 
@@ -23,11 +24,25 @@ namespace DevEn.Xrm.EntityValidation.Plugin
     {
         public const string PreImageAlias = "PreImage";
 
-        public static Entity Resolve(IPluginExecutionContext context)
+        public static Entity Resolve(IPluginExecutionContext context, ITracingService tracingService)
         {
+            WarnIfPreImageMissing(context, tracingService);
+
             var effective = ResolveBase(context);
             OverlayWellKnownParameters(effective, context);
             return effective;
+        }
+
+        private static void WarnIfPreImageMissing(IPluginExecutionContext context, ITracingService tracingService)
+        {
+            if (GetPreImage(context) != null || string.Equals(context.MessageName, "Create", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            tracingService.Trace(
+                "No '{0}' Pre-Image is registered on this step for message '{1}': attributes not carried by the request cannot be validated and their rules will pass silently.",
+                PreImageAlias,
+                context.MessageName);
         }
 
         private static Entity ResolveBase(IPluginExecutionContext context)
@@ -113,7 +128,7 @@ namespace DevEn.Xrm.EntityValidation.Plugin
 
         private static Entity GetPreImage(IPluginExecutionContext context)
         {
-            if (context.PreEntityImages != null && context.PreEntityImages.Contains(PreImageAlias))
+            if (context.PreEntityImages.Contains(PreImageAlias))
             {
                 return context.PreEntityImages[PreImageAlias];
             }

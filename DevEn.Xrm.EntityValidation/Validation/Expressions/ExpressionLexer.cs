@@ -8,9 +8,10 @@ namespace DevEn.Xrm.EntityValidation.Validation.Expressions
 {
     /// <summary>
     /// Turns an "Expression" rule's expression string into a flat list of <see cref="ExpressionToken"/>.
-    /// Bare words and quoted strings are checked against <see cref="DateTokenParser"/> before falling back
-    /// to a field reference or a plain string literal, so date tokens (<c>Today</c>, <c>Today+30d</c>, an
-    /// absolute ISO date in quotes...) are recognized with the exact same vocabulary as "DateRange" uses.
+    /// Bare words and quoted strings are checked against <see cref="DateTokenParser.TryParseStrict"/> before
+    /// falling back to a field reference or a plain string literal, so date tokens (<c>Today</c>,
+    /// <c>Today+30d</c>, an absolute ISO-8601 date in quotes...) are recognized with the same vocabulary
+    /// "DateRange" uses, without ordinary text being mistaken for a date.
     /// </summary>
     internal static class ExpressionLexer
     {
@@ -169,7 +170,7 @@ namespace DevEn.Xrm.EntityValidation.Validation.Expressions
             }
 
             var text = sb.ToString();
-            if (DateTokenParser.TryParse(text, out var dateValue))
+            if (DateTokenParser.TryParseStrict(text, out var dateValue))
             {
                 tokens.Add(new ExpressionToken(ExpressionTokenKind.DateLiteral, text, dateValue));
             }
@@ -231,7 +232,7 @@ namespace DevEn.Xrm.EntityValidation.Validation.Expressions
                 if (j > i + 1 && j < length && char.IsLetter(expression[j]) && (j + 1 >= length || !char.IsLetterOrDigit(expression[j + 1])))
                 {
                     var candidate = expression.Substring(start, j + 1 - start);
-                    if (DateTokenParser.TryParse(candidate, out var offsetDate))
+                    if (DateTokenParser.TryParseStrict(candidate, out var offsetDate))
                     {
                         tokens.Add(new ExpressionToken(ExpressionTokenKind.DateLiteral, candidate, offsetDate));
                         return j + 1;
@@ -239,7 +240,7 @@ namespace DevEn.Xrm.EntityValidation.Validation.Expressions
                 }
             }
 
-            if (DateTokenParser.TryParse(word, out var dateValue))
+            if (DateTokenParser.TryParseStrict(word, out var dateValue))
             {
                 tokens.Add(new ExpressionToken(ExpressionTokenKind.DateLiteral, word, dateValue));
                 return i;

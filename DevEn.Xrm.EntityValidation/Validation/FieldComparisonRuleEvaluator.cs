@@ -17,7 +17,7 @@ namespace DevEn.Xrm.EntityValidation.Validation
 
         public bool IsValid(Entity effectiveEntity, ValidationRuleDefinition rule, IOrganizationService organizationService)
         {
-            var leftRaw = AttributeValueConverter.GetRawValue(effectiveEntity, rule.AttributeLogicalName);
+            var leftRaw = AttributeValueConverter.GetRawValue(effectiveEntity, rule.RequireAttributeLogicalName());
             if (leftRaw == null)
             {
                 return true;

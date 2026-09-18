@@ -29,11 +29,6 @@ namespace DevEn.Xrm.EntityValidation.Model
                 throw new ValidationConfigurationException($"Validation rule {ruleId} does not specify a message (Create/Update/...).");
             }
 
-            if (string.IsNullOrWhiteSpace(attributeLogicalName))
-            {
-                throw new ValidationConfigurationException($"Validation rule {ruleId} does not specify the field to validate.");
-            }
-
             if (string.IsNullOrWhiteSpace(ruleType))
             {
                 throw new ValidationConfigurationException($"Validation rule {ruleId} does not specify a rule type.");
@@ -67,5 +62,21 @@ namespace DevEn.Xrm.EntityValidation.Model
         public string ErrorMessage { get; }
 
         public int ExecutionOrder { get; }
+
+        /// <summary>
+        /// Returns the field the rule is about, failing with a clear configuration error when it wasn't
+        /// specified. Rule types that really do work on a single field call this instead of reading
+        /// <see cref="AttributeLogicalName"/> directly, because others (AtLeastOneOf, Expression) carry
+        /// their fields in the parameters and legitimately leave it empty.
+        /// </summary>
+        public string RequireAttributeLogicalName()
+        {
+            if (string.IsNullOrWhiteSpace(AttributeLogicalName))
+            {
+                throw new ValidationConfigurationException($"Rule {RuleId} ({RuleType}) does not specify the field to validate.");
+            }
+
+            return AttributeLogicalName;
+        }
     }
 }

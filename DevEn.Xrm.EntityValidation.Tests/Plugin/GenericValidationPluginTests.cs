@@ -105,5 +105,31 @@ namespace DevEn.Xrm.EntityValidation.Tests.Plugin
 
             plugin.Execute(BuildServiceProvider(context, pluginContext));
         }
+
+        [TestMethod]
+        public void Execute_MisconfiguredRule_DoesNotLeakConfigurationDetailsToTheUser()
+        {
+            var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
+            var context = new XrmFakedContext();
+            context.Initialize(new List<Entity>
+            {
+                CreateConfigurationRow(entityName, "Create", "PreOperation", "name", "ThisRuleTypeDoesNotExist", "Error")
+            });
+
+            var pluginContext = context.GetDefaultPluginContext();
+            pluginContext.MessageName = "Create";
+            pluginContext.Stage = (int)PipelineStage.PreOperation;
+            pluginContext.PrimaryEntityName = entityName;
+            pluginContext.OrganizationId = Guid.NewGuid();
+            pluginContext.InputParameters["Target"] = new Entity(entityName);
+
+            var plugin = new PluginType(null, null);
+
+            var exception = Assert.ThrowsException<InvalidPluginExecutionException>(
+                () => plugin.Execute(BuildServiceProvider(context, pluginContext)));
+
+            StringAssert.Contains(exception.Message, "administrator");
+            Assert.IsFalse(exception.Message.Contains("ThisRuleTypeDoesNotExist"), "internal configuration details must stay in the trace log");
+        }
     }
 }

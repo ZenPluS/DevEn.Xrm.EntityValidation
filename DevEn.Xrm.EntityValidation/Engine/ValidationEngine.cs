@@ -12,6 +12,8 @@ namespace DevEn.Xrm.EntityValidation.Engine
     /// Retrieves the rules configured for the current entity/message/stage, evaluates all of them (to
     /// show the user the complete list of errors in a single pass) and, if at least one fails, throws a
     /// single <see cref="InvalidPluginExecutionException"/> containing all the configured messages.
+    /// Misconfigured rules are collected the same way and reported together as a single
+    /// <see cref="ValidationConfigurationException"/>, which takes precedence over validation messages.
     /// </summary>
     internal sealed class ValidationEngine
     {
@@ -50,14 +52,27 @@ namespace DevEn.Xrm.EntityValidation.Engine
             }
 
             var errorMessages = new List<string>();
+            var configurationErrors = new List<string>();
             foreach (var rule in rules)
             {
-                if (!_registry.TryGetEvaluator(rule.RuleType, out var evaluator))
+                bool isValid;
+                try
                 {
-                    throw new ValidationConfigurationException($"Unknown validation rule type: '{rule.RuleType}' (rule {rule.RuleId}).");
+                    if (!_registry.TryGetEvaluator(rule.RuleType, out var evaluator))
+                    {
+                        throw new ValidationConfigurationException($"Unknown validation rule type: '{rule.RuleType}' (rule {rule.RuleId}).");
+                    }
+
+                    isValid = evaluator.IsValid(effectiveEntity, rule, _organizationService);
+                }
+                catch (ValidationConfigurationException ex)
+                {
+                    _tracingService.Trace("Validation rule misconfigured: {0} (type={1}): {2}", rule.RuleId, rule.RuleType, ex.Message);
+                    configurationErrors.Add(ex.Message);
+                    continue;
                 }
 
-                if (evaluator.IsValid(effectiveEntity, rule, _organizationService))
+                if (isValid)
                 {
                     continue;
                 }
@@ -73,6 +88,11 @@ namespace DevEn.Xrm.EntityValidation.Engine
                     : rule.ErrorMessage;
 
                 errorMessages.Add(message);
+            }
+
+            if (configurationErrors.Count > 0)
+            {
+                throw new ValidationConfigurationException(string.Join(Environment.NewLine, configurationErrors.Distinct()));
             }
 
             if (errorMessages.Count == 0)

@@ -1,3 +1,4 @@
+using DevEn.Xrm.EntityValidation.Configuration;
 using DevEn.Xrm.EntityValidation.Tests.TestHelpers;
 using DevEn.Xrm.EntityValidation.Validation;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -44,6 +45,15 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
             var rule = TestRuleBuilder.Create("Required");
 
             Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+        }
+
+        [TestMethod]
+        public void IsValid_RuleWithoutField_ThrowsConfigurationException()
+        {
+            var entity = new Entity("account");
+            var rule = TestRuleBuilder.Create("Required", attributeLogicalName: null);
+
+            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(entity, rule, null));
         }
     }
 }

@@ -12,7 +12,7 @@ namespace DevEn.Xrm.EntityValidation.Validation
 
         public bool IsValid(Entity effectiveEntity, ValidationRuleDefinition rule, IOrganizationService organizationService)
         {
-            var value = AttributeValueConverter.GetRawValue(effectiveEntity, rule.AttributeLogicalName);
+            var value = AttributeValueConverter.GetRawValue(effectiveEntity, rule.RequireAttributeLogicalName());
             if (value == null)
             {
                 return false;

@@ -21,6 +21,19 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
         }
 
         [TestMethod]
+        public void IsValid_RuleWithoutField_IsAccepted()
+        {
+            // The fields live in the parameters: this rule type doesn't need the rule's own "field".
+            var entity = new Entity("contact") { ["telephone1"] = "12345" };
+            var rule = TestRuleBuilder.Create(
+                "AtLeastOneOf",
+                attributeLogicalName: null,
+                parametersJson: "{\"fields\":[\"emailaddress1\",\"telephone1\"]}");
+
+            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+        }
+
+        [TestMethod]
         public void IsValid_OneFilled_ReturnsTrue()
         {
             var entity = new Entity("contact") { ["telephone1"] = "12345" };

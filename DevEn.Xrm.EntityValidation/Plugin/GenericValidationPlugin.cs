@@ -46,7 +46,7 @@ namespace DevEn.Xrm.EntityValidation.Plugin
                 var repository = new DataverseValidationRuleRepository(localContext.SystemOrganizationService, tracingService, context.OrganizationId);
                 var engine = new ValidationEngine(repository, _registry, tracingService, localContext.UserOrganizationService);
 
-                var effectiveEntity = TargetEntityResolver.Resolve(context);
+                var effectiveEntity = TargetEntityResolver.Resolve(context, tracingService);
                 var stage = (PipelineStage)context.Stage;
 
                 engine.ValidateAndThrow(effectiveEntity, context.PrimaryEntityName, context.MessageName, stage);
@@ -57,8 +57,9 @@ namespace DevEn.Xrm.EntityValidation.Plugin
             }
             catch (ValidationConfigurationException ex)
             {
-                tracingService.Trace("Validation configuration error: {0}", ex.Message);
-                throw new InvalidPluginExecutionException(ex.Message, ex);
+                tracingService.Trace("Validation configuration error: {0}", ex);
+                throw new InvalidPluginExecutionException(
+                    "The validation configuration for this record is not valid. Contact your system administrator.", ex);
             }
             catch (Exception ex)
             {

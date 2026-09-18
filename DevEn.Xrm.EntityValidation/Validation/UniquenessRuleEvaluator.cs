@@ -25,7 +25,7 @@ namespace DevEn.Xrm.EntityValidation.Validation
                     $"Rule {rule.RuleId} (Uniqueness) requires Dataverse access, which isn't available in this context.");
             }
 
-            var rawValue = AttributeValueConverter.GetRawValue(effectiveEntity, rule.AttributeLogicalName);
+            var rawValue = AttributeValueConverter.GetRawValue(effectiveEntity, rule.RequireAttributeLogicalName());
             if (rawValue == null)
             {
                 return true;

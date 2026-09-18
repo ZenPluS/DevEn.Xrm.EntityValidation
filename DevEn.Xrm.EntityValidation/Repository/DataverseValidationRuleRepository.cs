@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Newtonsoft.Json;
@@ -76,17 +77,12 @@ namespace DevEn.Xrm.EntityValidation.Repository
 
             var allRulesForEntity = GetAllRulesForEntity(targetEntityLogicalName);
 
-            var matching = new List<ValidationRuleDefinition>();
-            foreach (var rule in allRulesForEntity)
-            {
-                if (rule.Stage == stage && string.Equals(rule.MessageName, messageName, StringComparison.OrdinalIgnoreCase))
-                {
-                    matching.Add(rule);
-                }
-            }
-
-            matching.Sort((left, right) => left.ExecutionOrder.CompareTo(right.ExecutionOrder));
-            return matching.AsReadOnly();
+            // OrderBy (unlike List.Sort) is stable, so rules sharing the same executionOrder - the default
+            // 0 for every rule - keep the order they were written in, and so do the messages shown.
+            return allRulesForEntity
+                .Where(rule => rule.Stage == stage && string.Equals(rule.MessageName, messageName, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(rule => rule.ExecutionOrder)
+                .ToList();
         }
 
         private IReadOnlyList<ValidationRuleDefinition> GetAllRulesForEntity(string targetEntityLogicalName)
@@ -94,7 +90,15 @@ namespace DevEn.Xrm.EntityValidation.Repository
             // The organization id is part of the key because the cache is static: a sandbox worker
             // process can serve multiple organizations, and it's essential not to mix their rules together.
             var cacheKey = string.Join("|", _organizationId.ToString("D"), targetEntityLogicalName.ToLowerInvariant());
-            return ValidationRuleCache.GetOrCreate(cacheKey, CacheDuration, () => QueryRulesForEntity(targetEntityLogicalName));
+
+            try
+            {
+                return ValidationRuleCache.GetOrCreate(cacheKey, CacheDuration, () => QueryRulesForEntity(targetEntityLogicalName));
+            }
+            catch (ConfigurationUnavailableException)
+            {
+                return Array.Empty<ValidationRuleDefinition>();
+            }
         }
 
         private IReadOnlyList<ValidationRuleDefinition> QueryRulesForEntity(string targetEntityLogicalName)
@@ -120,7 +124,7 @@ namespace DevEn.Xrm.EntityValidation.Repository
                 // environment, no privileges...): skip validation rather than blocking every operation.
                 _tracingService.Trace(
                     "Validation configuration for '{0}' is unavailable, skipping validation: {1}", targetEntityLogicalName, ex.Message);
-                return Array.Empty<ValidationRuleDefinition>();
+                throw new ConfigurationUnavailableException();
             }
 
             var rules = new List<ValidationRuleDefinition>();
@@ -190,6 +194,16 @@ namespace DevEn.Xrm.EntityValidation.Repository
             }
 
             throw new ValidationConfigurationException($"Rule '{ruleId}' specifies an invalid stage: '{stageText}'.");
+        }
+
+        /// <summary>
+        /// Reports "the configuration couldn't be read" without letting <see cref="ValidationRuleCache"/>
+        /// store the resulting empty list: the cache evicts faulted entries, so a transient failure only
+        /// skips validation for the current execution instead of for the whole cache window. A row that
+        /// genuinely doesn't exist returns an empty list normally, and that IS cached.
+        /// </summary>
+        private sealed class ConfigurationUnavailableException : Exception
+        {
         }
     }
 }

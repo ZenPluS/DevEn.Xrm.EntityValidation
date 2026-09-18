@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DevEn.Xrm.EntityValidation.Configuration;
 using DevEn.Xrm.EntityValidation.Repository;
 using DevEn.Xrm.EntityValidation.Tests.TestHelpers;
 using FakeXrmEasy;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -14,6 +16,48 @@ namespace DevEn.Xrm.EntityValidation.Tests.Repository
     [TestClass]
     public class DataverseValidationRuleRepositoryTests
     {
+        /// <summary>
+        /// Makes the first N <c>RetrieveMultiple</c> calls fail, the way a transient Dataverse error
+        /// (throttling, timeout...) would; everything else goes to the real fake service.
+        /// </summary>
+        private sealed class TransientlyFailingOrganizationService : IOrganizationService
+        {
+            private readonly IOrganizationService _inner;
+            private int _failuresLeft;
+
+            public TransientlyFailingOrganizationService(IOrganizationService inner, int failures)
+            {
+                _inner = inner;
+                _failuresLeft = failures;
+            }
+
+            public EntityCollection RetrieveMultiple(QueryBase query)
+            {
+                if (_failuresLeft <= 0)
+                {
+                    return _inner.RetrieveMultiple(query);
+                }
+
+                _failuresLeft--;
+                throw new InvalidOperationException("Transient failure.");
+            }
+
+            public Guid Create(Entity entity) => _inner.Create(entity);
+
+            public Entity Retrieve(string entityName, Guid id, ColumnSet columnSet) => _inner.Retrieve(entityName, id, columnSet);
+
+            public void Update(Entity entity) => _inner.Update(entity);
+
+            public void Delete(string entityName, Guid id) => _inner.Delete(entityName, id);
+
+            public OrganizationResponse Execute(OrganizationRequest request) => _inner.Execute(request);
+
+            public void Associate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
+                => _inner.Associate(entityName, entityId, relationship, relatedEntities);
+
+            public void Disassociate(string entityName, Guid entityId, Relationship relationship, EntityReferenceCollection relatedEntities)
+                => _inner.Disassociate(entityName, entityId, relationship, relatedEntities);
+        }
         private static Entity CreateConfigurationRow(string targetEntityLogicalName, JArray rules)
         {
             var entity = CreateConfigurationRowForInsert(targetEntityLogicalName, rules);
@@ -153,6 +197,51 @@ namespace DevEn.Xrm.EntityValidation.Tests.Repository
 
             // Organization A must instead keep seeing the already-cached result (a single rule).
             Assert.AreEqual(1, repositoryOrgA.GetActiveRules(entityName, "Create", PipelineStage.PreOperation).Count);
+        }
+
+        [TestMethod]
+        public void GetActiveRules_QueryFails_SkipsValidationWithoutCachingTheFailure()
+        {
+            var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
+            var context = new XrmFakedContext();
+            context.Initialize(new List<Entity>
+            {
+                CreateConfigurationRow(entityName, new JArray { CreateRule("Create", "PreOperation", "name") })
+            });
+
+            var organizationService = new TransientlyFailingOrganizationService(context.GetOrganizationService(), 1);
+            var repository = new DataverseValidationRuleRepository(organizationService, new FakeTracingService(), Guid.NewGuid());
+
+            Assert.AreEqual(
+                0,
+                repository.GetActiveRules(entityName, "Create", PipelineStage.PreOperation).Count,
+                "a failed configuration read must not block the business operation");
+
+            Assert.AreEqual(
+                1,
+                repository.GetActiveRules(entityName, "Create", PipelineStage.PreOperation).Count,
+                "the failure must not be cached, otherwise a transient error would disable validation for the whole cache window");
+        }
+
+        [TestMethod]
+        public void GetActiveRules_SameExecutionOrder_KeepsTheConfiguredOrder()
+        {
+            var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
+            var expectedOrder = new[] { "fieldA", "fieldB", "fieldC", "fieldD", "fieldE", "fieldF" };
+            var rules = new JArray();
+            foreach (var field in expectedOrder)
+            {
+                rules.Add(CreateRule("Create", "PreOperation", field));
+            }
+
+            var context = new XrmFakedContext();
+            context.Initialize(new List<Entity> { CreateConfigurationRow(entityName, rules) });
+
+            var repository = new DataverseValidationRuleRepository(context.GetOrganizationService(), new FakeTracingService(), Guid.NewGuid());
+
+            var activeRules = repository.GetActiveRules(entityName, "Create", PipelineStage.PreOperation);
+
+            CollectionAssert.AreEqual(expectedOrder, activeRules.Select(rule => rule.AttributeLogicalName).ToArray());
         }
     }
 }

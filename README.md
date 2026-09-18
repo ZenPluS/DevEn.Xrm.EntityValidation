@@ -96,11 +96,13 @@ One row holds **all** the rules for a single target entity:
 - **No matching row, or the table can't be queried at all** (e.g. Field Service / Universal Resource
   Scheduling isn't installed in this environment, or the row is deactivated): validation is **silently
   skipped** for that entity. This is treated as "no rules configured", not as an error, so the plugin never
-  blocks Create/Update/etc. on entities that simply haven't been set up yet.
+  blocks Create/Update/etc. on entities that simply haven't been set up yet. A *failed* query (throttling,
+  timeout, missing privileges...) skips validation for that execution only and is deliberately **not
+  cached**, so a transient error can't leave an entity unvalidated for the whole cache window.
 - **A row exists but `msdyn_value` is not valid JSON, or contains an element that isn't a JSON object, or an
-  invalid `stage` value**: this throws a `ValidationConfigurationException`, surfaced to the user as an
-  `InvalidPluginExecutionException`. This is an actual mistake to fix, so it fails loudly instead of being
-  swallowed.
+  invalid `stage` value**: this throws a `ValidationConfigurationException`, surfaced to the user as a
+  generic `InvalidPluginExecutionException` (details go to the trace log). This is an actual mistake to fix,
+  so it fails loudly instead of being swallowed.
 
 ### Rule object schema
 
@@ -111,12 +113,12 @@ Each element of the `msdyn_value` JSON array:
 | `id` | string | no | `"{entity}#{index}"` | Free-form identifier used in trace logs and internal error wrapping. |
 | `message` | string | yes | — | Dataverse message the rule applies to (`Create`, `Update`, `SetState`, `SetStateDynamicEntity`, `Delete`, `Assign`, ...), matched case-insensitively. |
 | `stage` | string | yes | — | One of `PreValidation`, `PreOperation`, `PostOperation` (matched case-insensitively). |
-| `field` | string | yes | — | Logical name of the attribute the rule is about (see per-rule-type notes for multi-field rules). |
+| `field` | string | usually | — | Logical name of the attribute the rule is about. Optional for the rule types that carry their fields in `parameters` (`AtLeastOneOf`, `Expression`); every other rule type fails with a configuration error when it's missing. |
 | `ruleType` | string | yes | — | One of the built-in types below, or a custom one registered in `RuleEvaluatorRegistry`. |
 | `parameters` | object | no | `{}` | Rule-type-specific parameters, see [Rule type reference](#rule-type-reference). |
 | `errorMessage` | string | no | auto-generated | Message shown to the end user when the rule fails. |
 | `isActive` | boolean | no | `true` | Set to `false` to disable a single rule without removing it. |
-| `executionOrder` | integer | no | `0` | Ascending sort order among rules matching the same message/stage. |
+| `executionOrder` | integer | no | `0` | Ascending sort order among rules matching the same message/stage. Rules sharing the same value keep the order they appear in the JSON array. |
 
 ### Example row
 
@@ -255,8 +257,9 @@ Grammar, low to high precedence: `||`, `&&`, unary `!`, non-chaining comparisons
 (`== != > >= < <=`), additive (`+ -`), multiplicative (`* /`), unary `-`, and parenthesized
 sub-expressions. Field names are bare identifiers (e.g. `creditlimit`); text literals use `'...'` or
 `"..."` (single quotes are recommended since `expression` itself sits inside a JSON string); `Today`,
-`Now`, `Today+30d`, `Today-1y` and absolute ISO dates are recognized the same way as in `DateRange`
-(see `DateTokenParser`); `true`/`false` are case-insensitive boolean literals.
+`Now`, `Today+30d`, `Today-1y` and absolute **ISO-8601** dates in quotes (`'2026-01-01'`) are recognized as
+dates; anything else in quotes stays text, so ordinary values are never mistaken for dates; `true`/`false`
+are case-insensitive boolean literals.
 
 Semantics:
 
@@ -307,8 +310,8 @@ Semantics:
 
 `{"fields": ["...", "..."], "minimumRequired": 1}`. Counts how many of the listed fields are populated
 (non-null, non-blank strings) and requires at least `minimumRequired`. The rule's own `field` value is not
-evaluated directly for this rule type — since it spans several fields, use it as a descriptive label (e.g.
-the field names joined by `;`).
+evaluated for this rule type and can be omitted — since the rule spans several fields, use it (if you want)
+as a descriptive label, e.g. the field names joined by `;`.
 
 ```json
 { "message": "Create", "stage": "PreOperation", "field": "emailaddress1;telephone1;mobilephone",
@@ -407,6 +410,9 @@ this library.
 4. If any configured rule reads a field that might not be part of the message's `Target` (any attribute on
    `Delete`/`Assign`/`SetState`, or an unchanged attribute on `Update`), register a **Pre-Image** named
    exactly `PreImage` on that step, including at least the attributes referenced by the configured rules.
+   Without it those rules pass silently (an absent attribute counts as satisfied); the plugin traces a
+   warning on every non-`Create` message with no Pre-Image registered, so check the trace log first when
+   validation seems not to run.
 5. Create (or activate) the `msdyn_configuration` row for the entity, as described in
    [Configuration model](#configuration-model). Without it, the step runs but finds no rules and does
    nothing.
@@ -423,8 +429,13 @@ The same plugin class is reused across every registration: "one or more generic 
   configured `errorMessage` with a newline.
 - If a rule's `errorMessage` is blank, a default is generated:
   `Field '{attributeLogicalName}' failed validation rule '{ruleType}'.`
-- An unknown `ruleType` (typo, or a type not registered in `RuleEvaluatorRegistry`) is a configuration
-  error and throws immediately; it is never silently ignored.
+- Configuration mistakes (an unknown `ruleType`, a missing required parameter, a rule applied to the wrong
+  field type...) never pass silently, and never stop the pass at the first one either: every misconfigured
+  rule is collected and they are all reported together, so an administrator fixes them in one round instead
+  of one per save attempt. A configuration error takes precedence over validation messages (fail closed).
+- The end user only sees a generic
+  "The validation configuration for this record is not valid. Contact your system administrator." message:
+  rule ids, field logical names, regex patterns and expression text stay in the server-side trace log.
 - Any unexpected exception is traced in full server-side (via `ITracingService`) but never shown to the end
   user with internal details: it is translated into a generic
   "An unexpected error occurred during validation. Contact your system administrator." message.
@@ -438,11 +449,17 @@ entries) of the parsed rules per organization and target entity:
   that can serve multiple organizations.
 - Entries expire after **5 minutes**; a change to a `msdyn_configuration` row can take up to 5 minutes to
   take effect.
-- If the underlying query/parsing fails (e.g. malformed JSON), the faulted entry is evicted immediately
-  instead of caching the failure for the full TTL, so a configuration fix takes effect on the very next
-  call.
+- If the underlying query/parsing fails (a transient Dataverse error, or malformed JSON), the faulted entry
+  is evicted immediately instead of caching the failure for the full TTL, so both a retry and a
+  configuration fix take effect on the very next call.
 
 ## Security model
+
+> **This component is a data-quality guardrail, not a security control.** It only runs where a step is
+> registered, it deliberately fails open when its configuration can't be read, and rules are cached for up
+> to 5 minutes. Anything that must hold unconditionally (privileges, tenant isolation, invariants a
+> malicious caller must not be able to bypass) has to be enforced by Dataverse security, an alternate key,
+> or another mechanism that cannot be skipped — not here.
 
 - **Configuration reads** (`DataverseValidationRuleRepository`) always use an elevated, system
   `IOrganizationService` (`LocalPluginContext.SystemOrganizationService`): a user without read access to
