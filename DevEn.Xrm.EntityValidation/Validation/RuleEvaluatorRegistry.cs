@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DevEn.Xrm.EntityValidation.Configuration;
+using DevEn.Xrm.EntityValidation.Model;
 
 namespace DevEn.Xrm.EntityValidation.Validation
 {
@@ -9,7 +10,7 @@ namespace DevEn.Xrm.EntityValidation.Validation
     /// (case-insensitive). Adding a new rule type only requires a new <see cref="IRuleEvaluator"/> class
     /// and one line in <see cref="CreateDefault"/>.
     /// </summary>
-    internal sealed class RuleEvaluatorRegistry
+    internal sealed class RuleEvaluatorRegistry : IRuleConfigurationValidator
     {
         private readonly IReadOnlyDictionary<string, IRuleEvaluator> _evaluatorsByRuleType;
 
@@ -70,6 +71,16 @@ namespace DevEn.Xrm.EntityValidation.Validation
             }
 
             return _evaluatorsByRuleType.TryGetValue(ruleType, out evaluator);
+        }
+
+        public void ValidateConfiguration(ValidationRuleDefinition rule, RuleConfigurationContext context)
+        {
+            if (!TryGetEvaluator(rule.RuleType, out var evaluator))
+            {
+                throw new ValidationConfigurationException($"Unknown validation rule type: '{rule.RuleType}' (rule {rule.RuleId}).");
+            }
+
+            (evaluator as IRuleConfigurationValidator)?.ValidateConfiguration(rule, context);
         }
     }
 }

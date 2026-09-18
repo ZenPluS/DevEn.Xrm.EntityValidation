@@ -85,7 +85,8 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
                 "Conditional",
                 attributeLogicalName: "fieldA",
                 parametersJson: "{\"when\":{\"field\":\"accounttype\",\"operator\":\"Equal\",\"value\":\"Customer\"},"
-                    + "\"then\":{\"ruleType\":\"Expression\",\"parameters\":{\"expression\":\"fieldA == fieldB\"}}}");
+                    + "\"then\":{\"ruleType\":\"Expression\",\"parameters\":{\"condition\":"
+                    + "{\"field\":\"fieldA\",\"op\":\"==\",\"compareToField\":\"fieldB\"}}}}");
 
             Assert.IsFalse(CreateEvaluator().IsValid(entity, rule, null));
         }

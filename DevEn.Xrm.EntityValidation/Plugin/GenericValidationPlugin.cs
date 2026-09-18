@@ -43,7 +43,7 @@ namespace DevEn.Xrm.EntityValidation.Plugin
 
             try
             {
-                var repository = new DataverseValidationRuleRepository(localContext.SystemOrganizationService, tracingService, context.OrganizationId);
+                var repository = new DataverseValidationRuleRepository(localContext.SystemOrganizationService, tracingService, context.OrganizationId, _registry);
                 var engine = new ValidationEngine(repository, _registry, tracingService, localContext.UserOrganizationService);
 
                 var effectiveEntity = TargetEntityResolver.Resolve(context, tracingService);

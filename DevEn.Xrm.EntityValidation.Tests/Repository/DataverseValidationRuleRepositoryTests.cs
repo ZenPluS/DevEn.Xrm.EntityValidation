@@ -4,6 +4,7 @@ using System.Linq;
 using DevEn.Xrm.EntityValidation.Configuration;
 using DevEn.Xrm.EntityValidation.Repository;
 using DevEn.Xrm.EntityValidation.Tests.TestHelpers;
+using DevEn.Xrm.EntityValidation.Validation;
 using FakeXrmEasy;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Xrm.Sdk;
@@ -242,6 +243,32 @@ namespace DevEn.Xrm.EntityValidation.Tests.Repository
             var activeRules = repository.GetActiveRules(entityName, "Create", PipelineStage.PreOperation);
 
             CollectionAssert.AreEqual(expectedOrder, activeRules.Select(rule => rule.AttributeLogicalName).ToArray());
+        }
+
+        [TestMethod]
+        public void GetActiveRules_BrokenRuleForAnotherMessage_IsStillReportedAtLoadTime()
+        {
+            var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
+            var brokenRule = CreateRule("Update", "PostOperation", null, ruleType: "Expression");
+            brokenRule["parameters"] = JObject.Parse(@"{""condition"":{""field"":""tipo"",""op"":""equalz"",""value"":""X""}}");
+
+            var rules = new JArray { CreateRule("Create", "PreOperation", "name"), brokenRule };
+
+            var context = new XrmFakedContext();
+            context.Initialize(new List<Entity> { CreateConfigurationRow(entityName, rules) });
+
+            var repository = new DataverseValidationRuleRepository(
+                context.GetOrganizationService(),
+                new FakeTracingService(),
+                Guid.NewGuid(),
+                RuleEvaluatorRegistry.CreateDefault());
+
+            // The broken rule targets Update/PostOperation: without load-time validation this call would
+            // happily return the Create rule and the mistake would stay hidden.
+            var exception = Assert.ThrowsException<ValidationConfigurationException>(
+                () => repository.GetActiveRules(entityName, "Create", PipelineStage.PreOperation));
+
+            StringAssert.Contains(exception.Message, "equalz");
         }
     }
 }

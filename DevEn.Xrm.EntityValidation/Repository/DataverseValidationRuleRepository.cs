@@ -5,8 +5,10 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using DevEn.Xrm.EntityValidation.Caching;
 using DevEn.Xrm.EntityValidation.Configuration;
 using DevEn.Xrm.EntityValidation.Model;
+using DevEn.Xrm.EntityValidation.Validation;
 
 namespace DevEn.Xrm.EntityValidation.Repository
 {
@@ -55,12 +57,18 @@ namespace DevEn.Xrm.EntityValidation.Repository
         private readonly IOrganizationService _organizationService;
         private readonly ITracingService _tracingService;
         private readonly Guid _organizationId;
+        private readonly IRuleConfigurationValidator _configurationValidator;
 
-        public DataverseValidationRuleRepository(IOrganizationService organizationService, ITracingService tracingService, Guid organizationId)
+        public DataverseValidationRuleRepository(
+            IOrganizationService organizationService,
+            ITracingService tracingService,
+            Guid organizationId,
+            IRuleConfigurationValidator configurationValidator = null)
         {
             _organizationService = organizationService ?? throw new ArgumentNullException(nameof(organizationService));
             _tracingService = tracingService ?? throw new ArgumentNullException(nameof(tracingService));
             _organizationId = organizationId;
+            _configurationValidator = configurationValidator;
         }
 
         public IReadOnlyList<ValidationRuleDefinition> GetActiveRules(string targetEntityLogicalName, string messageName, PipelineStage stage)
@@ -89,11 +97,11 @@ namespace DevEn.Xrm.EntityValidation.Repository
         {
             // The organization id is part of the key because the cache is static: a sandbox worker
             // process can serve multiple organizations, and it's essential not to mix their rules together.
-            var cacheKey = string.Join("|", _organizationId.ToString("D"), targetEntityLogicalName.ToLowerInvariant());
+            var cacheKey = string.Join("|", "rules", _organizationId.ToString("D"), targetEntityLogicalName.ToLowerInvariant());
 
             try
             {
-                return ValidationRuleCache.GetOrCreate(cacheKey, CacheDuration, () => QueryRulesForEntity(targetEntityLogicalName));
+                return ExpiringCache.GetOrCreate(cacheKey, CacheDuration, () => QueryRulesForEntity(targetEntityLogicalName));
             }
             catch (ConfigurationUnavailableException)
             {
@@ -134,7 +142,40 @@ namespace DevEn.Xrm.EntityValidation.Repository
                 rules.AddRange(ParseRules(json, targetEntityLogicalName));
             }
 
+            ValidateRuleConfiguration(rules);
             return rules;
+        }
+
+        /// <summary>
+        /// Checks every rule of the entity - not just the ones matching the current message/stage - while
+        /// the configuration is being loaded, so a mistake surfaces at the first save of any record instead
+        /// of the first time that particular rule happens to run. All the problems are reported together.
+        /// </summary>
+        private void ValidateRuleConfiguration(IReadOnlyList<ValidationRuleDefinition> rules)
+        {
+            if (_configurationValidator == null)
+            {
+                return;
+            }
+
+            var context = new RuleConfigurationContext(_organizationService, _organizationId, _tracingService);
+            var errors = new List<string>();
+            foreach (var rule in rules)
+            {
+                try
+                {
+                    _configurationValidator.ValidateConfiguration(rule, context);
+                }
+                catch (ValidationConfigurationException ex)
+                {
+                    errors.Add(ex.Message);
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                throw new ValidationConfigurationException(string.Join(Environment.NewLine, errors.Distinct()));
+            }
         }
 
         private static List<ValidationRuleDefinition> ParseRules(string json, string targetEntityLogicalName)

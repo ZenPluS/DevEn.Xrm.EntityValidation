@@ -71,8 +71,8 @@ flowchart TD
 | `Plugin.GenericValidationPlugin` | Public `IPlugin` entry point. Wires the other components together and translates exceptions into safe, user-facing messages. |
 | `Plugin.LocalPluginContext` | Exposes the platform-provided services, split into an elevated system service (configuration reads) and the calling user's own service (rule evaluation). |
 | `Plugin.TargetEntityResolver` | Rebuilds the "effective" `Entity` to validate from whichever shape the current message uses (`Target` as `Entity`, `Target` as `EntityReference`, or `EntityMoniker`), merged with the Pre-Image when registered. |
-| `Repository.DataverseValidationRuleRepository` | Reads and parses the JSON rules configured for a given target entity, with caching and the silent-fallback/loud-failure behavior described below. |
-| `Repository.ValidationRuleCache` | Static, thread-safe, 5-minute in-memory cache of parsed rules, keyed per organization and entity. |
+| `Repository.DataverseValidationRuleRepository` | Reads and parses the JSON rules configured for a given target entity, with caching and the silent-fallback/loud-failure behavior described below. Also checks every rule's configuration while loading it. |
+| `Caching.ExpiringCache` | Static, thread-safe, expiring in-memory cache shared by the parsed rules (5 minutes) and the entity metadata (30 minutes), keyed per organization. |
 | `Engine.ValidationEngine` | Evaluates every rule matching the current entity/message/stage and aggregates all failures into a single exception. |
 | `Validation.RuleEvaluatorRegistry` | Case-insensitive lookup from a rule's `ruleType` string to its `IRuleEvaluator` implementation. |
 | `Validation.IRuleEvaluator` implementations | One class per rule type; see [Rule type reference](#rule-type-reference). |
@@ -164,7 +164,7 @@ compose with a separate `Required` rule on the same field to also enforce its pr
 | `AllowedValues` | Value must be one of a fixed list | `values` (required array), `caseSensitive` (optional, default `false`) |
 | `FieldComparison` | Compare the field to another field on the same record | `compareToAttribute` (required), `operator` (required) |
 | `DateRange` | Date/time value within bounds | `min`, `max` (both optional, absolute or relative) |
-| `Expression` | Evaluate a boolean/arithmetic expression over the record's fields | `expression` (required) |
+| `Expression` | Evaluate a condition over the record's fields (comparisons, all/any/not, arithmetic) | `condition` (required object) |
 | `AtLeastOneOf` | At least N of several fields must be populated | `fields` (required array), `minimumRequired` (optional, default `1`) |
 | `Conditional` | Apply another rule only if a condition holds | `when` (required), `then` (required) |
 | `Uniqueness` | No other record may share this field's value | `scopeFields` (optional array) |
@@ -249,62 +249,113 @@ relative token evaluated against UTC "now": `Today`, `Now`, `Today+Nd`/`Today-Nd
 
 ### Expression
 
-`{"expression": "..."}`. Evaluates a small boolean/arithmetic expression against the record's fields —
-a generalization of `FieldComparison` and `DateRange` for the compound conditions those two can't express
-in a single rule: offset comparisons between two fields, AND/OR combinations, and arithmetic between fields.
+`{"condition": { ... }}`. Evaluates a condition described as JSON — a generalization of `FieldComparison`
+and `DateRange` for the compound checks those two can't express in a single rule: offset comparisons
+between two fields, and/or combinations, and arithmetic between fields.
 
-Grammar, low to high precedence: `||`, `&&`, unary `!`, non-chaining comparisons
-(`== != > >= < <=`), additive (`+ -`), multiplicative (`* /`), unary `-`, and parenthesized
-sub-expressions. Field names are bare identifiers (e.g. `creditlimit`); text literals use `'...'` or
-`"..."` (single quotes are recommended since `expression` itself sits inside a JSON string); `Today`,
-`Now`, `Today+30d`, `Today-1y` and absolute **ISO-8601** dates in quotes (`'2026-01-01'`) are recognized as
-dates; anything else in quotes stays text, so ordinary values are never mistaken for dates; `true`/`false`
-are case-insensitive boolean literals.
+A **condition** is either a comparison or a group:
+
+| Form | Shape |
+|---|---|
+| Comparison | `{ "field": "...", "op": "...", <right-hand side> }` |
+| All must hold | `{ "all": [ <condition>, ... ] }` (`and` is accepted too) |
+| At least one must hold | `{ "any": [ <condition>, ... ] }` (`or` is accepted too) |
+| Negation | `{ "not": <condition> }` |
+
+A **comparison** takes a left side, an operator and a right-hand side:
+
+| Key | Role |
+|---|---|
+| `field` | Left side, as an attribute logical name (use `left` instead for arithmetic) |
+| `left` | Left side as an operand object, when it needs arithmetic |
+| `op` | `==`, `!=`, `>`, `>=`, `<`, `<=` — `=`, `<>` and `eq`/`ne`/`gt`/`gte`/`lt`/`lte` are accepted as aliases |
+| `value` | Right side as a literal **text, number or boolean** (never interpreted as a date) |
+| `date` | Right side as a date: ISO-8601 (`"2026-01-01"`) or a relative token (`"Today"`, `"Now"`, `"Today+30d"`, `"Today-1y"`, `"Today+6m"`) |
+| `compareToField` | Right side as another attribute's logical name |
+| `compareTo` | Right side as an operand object, when it needs arithmetic |
+
+An **operand object** (`left`, `compareTo`, and the argument of an operation) has exactly one source —
+`field`, `value` or `date` — plus at most one operation:
+
+| Operation | Applies to | Meaning |
+|---|---|---|
+| `add`, `subtract`, `multiply`, `divide` | numbers | usual arithmetic |
+| `addDays`, `subtractDays` | a date | shifts the date by N days |
+| `differenceInDays` | two dates | the day difference, as a number |
+
+The argument of an operation is either a literal (`"multiply": 1.1`) or another operand object
+(`"multiply": { "field": "rate" }`).
 
 Semantics:
 
-- Comparisons reuse the exact type-compatibility rules as `FieldComparison` (numeric/numeric,
-  date/date, or strict text/text); comparing incompatible types throws `ValidationConfigurationException`.
-- `date ± number` offsets the date by that many days; `date − date` yields the numeric day difference;
-  `date + date` throws; dividing by zero throws.
+- Comparisons reuse the exact type-compatibility rules as `FieldComparison` (numeric/numeric, date/date, or
+  strict text/text); comparing incompatible types throws `ValidationConfigurationException`.
 - If either side of a comparison is `null`/absent, that comparison is vacuously satisfied (`true`) —
   consistent with every other rule type's "absent field ⇒ satisfied" convention.
-- The expression's overall result must be boolean: an expression that evaluates to a raw number, string,
-  date, or an absent field used directly (not through a comparison) throws
-  `ValidationConfigurationException` rather than guessing.
-- Guarded against pathological configuration: the `expression` string is capped at 500 characters, and
-  nesting (parentheses, unary operator chains) is capped at 20 levels; both throw
-  `ValidationConfigurationException` when exceeded.
+- Relative dates are resolved when the record is validated, not when the condition is compiled, so `Today`
+  always means today.
+- Every key is matched case-insensitively (`"Field"` works as well as `"field"`), and nesting is capped at
+  20 levels.
+- Errors name the exact JSON path they come from, e.g.
+  `Rule account#3 (Expression) at 'condition.all[1].op': 'equalz' is not a valid operator; use ==, !=, >, >=, < or <=`.
+- Attribute names are checked against the entity's metadata when the configuration is loaded, so a typo
+  (`paesse` for `paese`) is reported as a configuration error instead of silently reading as "absent" and
+  letting the rule pass forever. If metadata can't be read in that environment, the check is skipped rather
+  than blocking.
+
+Two fields must match:
 
 ```json
-{ "message": "Update", "stage": "PreOperation", "field": "fieldA", "ruleType": "Expression",
-  "parameters": { "expression": "fieldA == fieldB" },
+{ "message": "Update", "stage": "PreOperation", "ruleType": "Expression",
+  "parameters": { "condition": { "field": "fieldA", "op": "==", "compareToField": "fieldB" } },
   "errorMessage": "Field A and Field B must match." }
 ```
 
+A date cannot be in the past:
+
 ```json
-{ "message": "Create", "stage": "PreOperation", "field": "somedate", "ruleType": "Expression",
-  "parameters": { "expression": "somedate >= Today" },
+{ "message": "Create", "stage": "PreOperation", "ruleType": "Expression",
+  "parameters": { "condition": { "field": "somedate", "op": ">=", "date": "Today" } },
   "errorMessage": "The date cannot be in the past." }
 ```
 
+A date must stay within 30 days of another one:
+
 ```json
-{ "message": "Update", "stage": "PreOperation", "field": "dateA", "ruleType": "Expression",
-  "parameters": { "expression": "dateA <= dateB + 30" },
+{ "message": "Update", "stage": "PreOperation", "ruleType": "Expression",
+  "parameters": { "condition": {
+      "field": "dateA", "op": "<=",
+      "compareTo": { "field": "dateB", "addDays": 30 } } },
   "errorMessage": "Date A must be within 30 days of Date B." }
 ```
 
+Several conditions at once:
+
 ```json
-{ "message": "Create", "stage": "PreOperation", "field": "paese", "ruleType": "Expression",
-  "parameters": { "expression": "tipo == 'Cliente' && paese == 'IT'" },
+{ "message": "Create", "stage": "PreOperation", "ruleType": "Expression",
+  "parameters": { "condition": { "all": [
+      { "field": "tipo",  "op": "==", "value": "Cliente" },
+      { "field": "paese", "op": "==", "value": "IT" } ] } },
   "errorMessage": "Italian customers only." }
 ```
 
+Arithmetic between fields, under an `any` group:
+
 ```json
-{ "message": "Update", "stage": "PreOperation", "field": "importo", "ruleType": "Expression",
-  "parameters": { "expression": "importo <= creditlimit * 1.1" },
+{ "message": "Update", "stage": "PreOperation", "ruleType": "Expression",
+  "parameters": { "condition": { "all": [
+      { "any": [
+          { "field": "tipo", "op": "==", "value": "Cliente" },
+          { "field": "tipo", "op": "==", "value": "Partner" } ] },
+      { "field": "importo", "op": "<=",
+        "compareTo": { "field": "creditlimit", "multiply": 1.1 } } ] } },
   "errorMessage": "Amount exceeds the credit limit by more than 10%." }
 ```
+
+> The earlier text syntax (`"parameters": { "expression": "importo <= creditlimit * 1.1" }`) is no longer
+> supported: a rule still using it fails with a message pointing at `condition`. It was replaced because a
+> mistyped field name in a free-text expression silently disabled the rule, and syntax errors could only be
+> found by saving a record that happened to trigger it.
 
 ### AtLeastOneOf
 
@@ -433,6 +484,10 @@ The same plugin class is reused across every registration: "one or more generic 
   field type...) never pass silently, and never stop the pass at the first one either: every misconfigured
   rule is collected and they are all reported together, so an administrator fixes them in one round instead
   of one per save attempt. A configuration error takes precedence over validation messages (fail closed).
+- Rules that can be checked without a record (today: `Expression`) are checked **when the configuration is
+  loaded** — that is, for every message and stage at once — so a mistake in a rule that only applies to,
+  say, `Update`/`PostOperation` surfaces at the first save of any record of that entity instead of the
+  first time that specific rule happens to run.
 - The end user only sees a generic
   "The validation configuration for this record is not valid. Contact your system administrator." message:
   rule ids, field logical names, regex patterns and expression text stay in the server-side trace log.
@@ -442,13 +497,16 @@ The same plugin class is reused across every registration: "one or more generic 
 
 ## Caching
 
-`ValidationRuleCache` is a static, process-wide, thread-safe cache (`ConcurrentDictionary` of `Lazy`
-entries) of the parsed rules per organization and target entity:
+`ExpiringCache` is a static, process-wide, thread-safe cache (`ConcurrentDictionary` of `Lazy`
+entries) shared by everything the plugin reads from Dataverse but that changes far less often than it runs:
 
 - Cache key: organization id + target entity logical name (lowercased) — safe for a sandbox worker process
   that can serve multiple organizations.
-- Entries expire after **5 minutes**; a change to a `msdyn_configuration` row can take up to 5 minutes to
-  take effect.
+- Parsed rules expire after **5 minutes**; a change to a `msdyn_configuration` row can take up to 5 minutes
+  to take effect.
+- Entity metadata (used to check that a rule's attribute names exist) goes through the same cache with a
+  **30-minute** expiry, and `Expression` conditions are compiled once per distinct `parameters` payload
+  instead of once per validated record.
 - If the underlying query/parsing fails (a transient Dataverse error, or malformed JSON), the faulted entry
   is evicted immediately instead of caching the failure for the full TTL, so both a retry and a
   configuration fix take effect on the very next call.
@@ -475,8 +533,10 @@ entries) of the parsed rules per organization and target entity:
 3. Implement `IsValid`, returning `true`/`false` for the actual outcome and throwing
    `ValidationConfigurationException` for configuration mistakes (missing/invalid parameters, wrong field
    type, ...).
-4. Register an instance in `RuleEvaluatorRegistry.CreateDefault()`.
-5. Add unit tests under `DevEn.Xrm.EntityValidation.Tests/Validation/`.
+4. Optionally also implement `IRuleConfigurationValidator` to have the rule's configuration checked while
+   it is loaded, before any record is validated.
+5. Register an instance in `RuleEvaluatorRegistry.CreateDefault()`.
+6. Add unit tests under `DevEn.Xrm.EntityValidation.Tests/Validation/`.
 
 No other component needs to change: the repository, engine and plugin are all rule-type-agnostic.
 
@@ -485,10 +545,12 @@ No other component needs to change: the repository, engine and plugin are all ru
 ```
 DevEn.Xrm.EntityValidation.slnx
 DevEn.Xrm.EntityValidation/                Main plugin assembly (net462, class library)
+  Caching/                                 ExpiringCache
   Configuration/                           PipelineStage enum, ValidationConfigurationException
   Model/                                   ValidationRuleDefinition
-  Repository/                              IValidationRuleRepository, DataverseValidationRuleRepository, ValidationRuleCache
+  Repository/                              IValidationRuleRepository, DataverseValidationRuleRepository
   Validation/                              IRuleEvaluator, all rule evaluators, RuleEvaluatorRegistry, shared helpers
+  Validation/Conditions/                   Compiler and evaluator of the Expression rule's condition tree
   Engine/                                  ValidationEngine
   Plugin/                                  GenericValidationPlugin, LocalPluginContext, TargetEntityResolver
 DevEn.Xrm.EntityValidation.Tests/          MSTest + FakeXrmEasy test project, mirroring the folder layout above

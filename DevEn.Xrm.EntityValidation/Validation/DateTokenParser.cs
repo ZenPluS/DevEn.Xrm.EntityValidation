@@ -14,16 +14,6 @@ namespace DevEn.Xrm.EntityValidation.Validation
         private static readonly Regex RelativeTokenPattern =
             new Regex(@"^Today([+-]\d+)([dmy])$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        private static readonly string[] IsoFormats =
-        {
-            "yyyy-MM-dd",
-            "yyyy-MM-ddTHH:mmK",
-            "yyyy-MM-ddTHH:mm:ssK",
-            "yyyy-MM-ddTHH:mm:ss.FFFFFFFK",
-            "yyyy-MM-dd HH:mm",
-            "yyyy-MM-dd HH:mm:ss"
-        };
-
         public static bool TryParse(string token, out DateTime value)
         {
             if (TryParseRelative(token, out value))
@@ -38,32 +28,6 @@ namespace DevEn.Xrm.EntityValidation.Validation
 
             return DateTime.TryParse(
                 token,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                out value);
-        }
-
-        /// <summary>
-        /// Same relative tokens as <see cref="TryParse"/>, but an absolute date must be written in ISO-8601.
-        /// Used where text is only *candidate* date syntax (the expression lexer), because the permissive
-        /// <see cref="DateTime.TryParse(string)"/> fallback would silently turn ordinary values such as
-        /// '1.5' into date literals and then fail the comparison as a type mismatch.
-        /// </summary>
-        public static bool TryParseStrict(string token, out DateTime value)
-        {
-            if (TryParseRelative(token, out value))
-            {
-                return true;
-            }
-
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return false;
-            }
-
-            return DateTime.TryParseExact(
-                token,
-                IsoFormats,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                 out value);

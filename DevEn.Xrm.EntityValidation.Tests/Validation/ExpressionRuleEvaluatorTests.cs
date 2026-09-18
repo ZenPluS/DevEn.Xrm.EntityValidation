@@ -12,40 +12,56 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
     {
         private readonly ExpressionRuleEvaluator _evaluator = new ExpressionRuleEvaluator();
 
+        private bool Evaluate(Entity entity, string conditionJson)
+        {
+            var rule = TestRuleBuilder.Create(
+                "Expression",
+                attributeLogicalName: null,
+                parametersJson: "{\"condition\":" + conditionJson + "}");
+
+            return _evaluator.IsValid(entity, rule, null);
+        }
+
         [TestMethod]
         public void IsValid_FieldEqualsField_MatchingValues_ReturnsTrue()
         {
             var entity = new Entity("account") { ["fieldA"] = "same", ["fieldB"] = "same" };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"fieldA == fieldB\"}");
 
-            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""fieldA"",""op"":""=="",""compareToField"":""fieldB""}"));
         }
 
         [TestMethod]
         public void IsValid_FieldEqualsField_DifferingValues_ReturnsFalse()
         {
             var entity = new Entity("account") { ["fieldA"] = "left", ["fieldB"] = "right" };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"fieldA == fieldB\"}");
 
-            Assert.IsFalse(_evaluator.IsValid(entity, rule, null));
+            Assert.IsFalse(Evaluate(entity, @"{""field"":""fieldA"",""op"":""=="",""compareToField"":""fieldB""}"));
+        }
+
+        [TestMethod]
+        public void IsValid_OperatorAliases_BehaveLikeTheSymbols()
+        {
+            var entity = new Entity("account") { ["tipo"] = "Cliente" };
+
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""tipo"",""op"":""eq"",""value"":""Cliente""}"));
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""tipo"",""op"":""="",""value"":""Cliente""}"));
+            Assert.IsFalse(Evaluate(entity, @"{""field"":""tipo"",""op"":""<>"",""value"":""Cliente""}"));
         }
 
         [TestMethod]
         public void IsValid_DateGreaterOrEqualToday_FutureDate_ReturnsTrue()
         {
             var entity = new Entity("account") { ["somedate"] = DateTime.UtcNow.AddDays(1) };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"somedate >= Today\"}");
 
-            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""somedate"",""op"":"">="",""date"":""Today""}"));
         }
 
         [TestMethod]
         public void IsValid_DateGreaterOrEqualToday_PastDate_ReturnsFalse()
         {
             var entity = new Entity("account") { ["somedate"] = DateTime.UtcNow.AddDays(-1) };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"somedate >= Today\"}");
 
-            Assert.IsFalse(_evaluator.IsValid(entity, rule, null));
+            Assert.IsFalse(Evaluate(entity, @"{""field"":""somedate"",""op"":"">="",""date"":""Today""}"));
         }
 
         [TestMethod]
@@ -53,9 +69,8 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
         {
             var today = DateTime.UtcNow.Date;
             var entity = new Entity("account") { ["dateA"] = today, ["dateB"] = today };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"dateA <= dateB + 30\"}");
 
-            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""dateA"",""op"":""<="",""compareTo"":{""field"":""dateB"",""addDays"":30}}"));
         }
 
         [TestMethod]
@@ -63,100 +78,129 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
         {
             var today = DateTime.UtcNow.Date;
             var entity = new Entity("account") { ["dateA"] = today.AddDays(31), ["dateB"] = today };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"dateA <= dateB + 30\"}");
 
-            Assert.IsFalse(_evaluator.IsValid(entity, rule, null));
+            Assert.IsFalse(Evaluate(entity, @"{""field"":""dateA"",""op"":""<="",""compareTo"":{""field"":""dateB"",""addDays"":30}}"));
         }
 
         [TestMethod]
-        public void IsValid_CombinedAndCondition_BothMatch_ReturnsTrue()
+        public void IsValid_DifferenceInDays_ComparedToANumber()
+        {
+            var today = DateTime.UtcNow.Date;
+            var entity = new Entity("account") { ["dateA"] = today.AddDays(10), ["dateB"] = today };
+
+            Assert.IsFalse(Evaluate(
+                entity,
+                @"{""left"":{""field"":""dateA"",""differenceInDays"":{""field"":""dateB""}},""op"":""<="",""value"":7}"));
+        }
+
+        [TestMethod]
+        public void IsValid_AllGroup_BothMatch_ReturnsTrue()
         {
             var entity = new Entity("account") { ["tipo"] = "Cliente", ["paese"] = "IT" };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"tipo == 'Cliente' && paese == 'IT'\"}");
 
-            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+            Assert.IsTrue(Evaluate(entity, @"{""all"":[
+                {""field"":""tipo"",""op"":""=="",""value"":""Cliente""},
+                {""field"":""paese"",""op"":""=="",""value"":""IT""}]}"));
         }
 
         [TestMethod]
-        public void IsValid_CombinedAndCondition_OneMismatches_ReturnsFalse()
+        public void IsValid_AllGroup_OneMismatches_ReturnsFalse()
         {
             var entity = new Entity("account") { ["tipo"] = "Cliente", ["paese"] = "FR" };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"tipo == 'Cliente' && paese == 'IT'\"}");
 
-            Assert.IsFalse(_evaluator.IsValid(entity, rule, null));
+            Assert.IsFalse(Evaluate(entity, @"{""all"":[
+                {""field"":""tipo"",""op"":""=="",""value"":""Cliente""},
+                {""field"":""paese"",""op"":""=="",""value"":""IT""}]}"));
+        }
+
+        [TestMethod]
+        public void IsValid_AnyGroup_OneMatches_ReturnsTrue()
+        {
+            var entity = new Entity("account") { ["tipo"] = "Partner" };
+
+            Assert.IsTrue(Evaluate(entity, @"{""any"":[
+                {""field"":""tipo"",""op"":""=="",""value"":""Cliente""},
+                {""field"":""tipo"",""op"":""=="",""value"":""Partner""}]}"));
+        }
+
+        [TestMethod]
+        public void IsValid_NotGroup_InvertsTheInnerCondition()
+        {
+            var entity = new Entity("account") { ["tipo"] = "Cliente" };
+
+            Assert.IsFalse(Evaluate(entity, @"{""not"":{""field"":""tipo"",""op"":""=="",""value"":""Cliente""}}"));
         }
 
         [TestMethod]
         public void IsValid_Arithmetic_WithinCreditLimitMargin_ReturnsTrue()
         {
             var entity = new Entity("account") { ["importo"] = 100m, ["creditlimit"] = 100m };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"importo <= creditlimit * 1.1\"}");
 
-            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""importo"",""op"":""<="",""compareTo"":{""field"":""creditlimit"",""multiply"":1.1}}"));
         }
 
         [TestMethod]
         public void IsValid_Arithmetic_ExceedsCreditLimitMargin_ReturnsFalse()
         {
             var entity = new Entity("account") { ["importo"] = 120m, ["creditlimit"] = 100m };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"importo <= creditlimit * 1.1\"}");
 
-            Assert.IsFalse(_evaluator.IsValid(entity, rule, null));
+            Assert.IsFalse(Evaluate(entity, @"{""field"":""importo"",""op"":""<="",""compareTo"":{""field"":""creditlimit"",""multiply"":1.1}}"));
         }
 
         [TestMethod]
         public void IsValid_AbsentField_ReturnsTrue()
         {
             var entity = new Entity("account");
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"fieldA == fieldB\"}");
 
-            Assert.IsTrue(_evaluator.IsValid(entity, rule, null));
+            Assert.IsTrue(Evaluate(entity, @"{""field"":""fieldA"",""op"":""=="",""compareToField"":""fieldB""}"));
         }
 
         [TestMethod]
         public void IsValid_IncompatibleTypes_ThrowsConfigurationException()
         {
             var entity = new Entity("account") { ["fieldA"] = "text", ["fieldB"] = 123 };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"fieldA == fieldB\"}");
 
-            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(entity, rule, null));
+            Assert.ThrowsException<ValidationConfigurationException>(
+                () => Evaluate(entity, @"{""field"":""fieldA"",""op"":""=="",""compareToField"":""fieldB""}"));
         }
 
         [TestMethod]
         public void IsValid_DivisionByZero_ThrowsConfigurationException()
         {
             var entity = new Entity("account") { ["importo"] = 10m, ["creditlimit"] = 0m };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"importo / creditlimit > 1\"}");
 
-            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(entity, rule, null));
+            Assert.ThrowsException<ValidationConfigurationException>(() => Evaluate(
+                entity,
+                @"{""left"":{""field"":""importo"",""divide"":{""field"":""creditlimit""}},""op"":"">"",""value"":1}"));
         }
 
         [TestMethod]
-        public void IsValid_ExpressionTooLong_ThrowsConfigurationException()
+        public void IsValid_DayArithmeticOnANumericField_ThrowsConfigurationException()
         {
-            var entity = new Entity("account");
-            var longExpression = new string('a', 600);
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"" + longExpression + "\"}");
+            var entity = new Entity("account") { ["importo"] = 10m };
 
-            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(entity, rule, null));
+            Assert.ThrowsException<ValidationConfigurationException>(() => Evaluate(
+                entity,
+                @"{""left"":{""field"":""importo"",""addDays"":5},""op"":"">"",""value"":1}"));
         }
 
         [TestMethod]
-        public void IsValid_NonBooleanRootResult_ThrowsConfigurationException()
+        public void IsValid_LegacyExpressionSyntax_PointsAtTheNewFormat()
         {
-            var entity = new Entity("account") { ["importo"] = 5m };
-            var rule = TestRuleBuilder.Create("Expression", parametersJson: "{\"expression\":\"importo\"}");
+            var rule = TestRuleBuilder.Create("Expression", parametersJson: @"{""expression"":""fieldA == fieldB""}");
 
-            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(entity, rule, null));
+            var exception = Assert.ThrowsException<ValidationConfigurationException>(
+                () => _evaluator.IsValid(new Entity("account"), rule, null));
+
+            StringAssert.Contains(exception.Message, "'condition'");
         }
 
         [TestMethod]
-        public void IsValid_MissingExpressionParameter_ThrowsConfigurationException()
+        public void IsValid_MissingCondition_ThrowsConfigurationException()
         {
-            var entity = new Entity("account");
             var rule = TestRuleBuilder.Create("Expression", parametersJson: "{}");
 
-            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(entity, rule, null));
+            Assert.ThrowsException<ValidationConfigurationException>(() => _evaluator.IsValid(new Entity("account"), rule, null));
         }
     }
 }
