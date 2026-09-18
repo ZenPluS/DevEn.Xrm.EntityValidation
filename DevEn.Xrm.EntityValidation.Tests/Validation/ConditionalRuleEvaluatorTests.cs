@@ -78,6 +78,19 @@ namespace DevEn.Xrm.EntityValidation.Tests.Validation
         }
 
         [TestMethod]
+        public void IsValid_InnerRuleTypeExpression_EvaluatesInnerExpression()
+        {
+            var entity = new Entity("account") { ["accounttype"] = "Customer", ["fieldA"] = "X", ["fieldB"] = "Y" };
+            var rule = TestRuleBuilder.Create(
+                "Conditional",
+                attributeLogicalName: "fieldA",
+                parametersJson: "{\"when\":{\"field\":\"accounttype\",\"operator\":\"Equal\",\"value\":\"Customer\"},"
+                    + "\"then\":{\"ruleType\":\"Expression\",\"parameters\":{\"expression\":\"fieldA == fieldB\"}}}");
+
+            Assert.IsFalse(CreateEvaluator().IsValid(entity, rule, null));
+        }
+
+        [TestMethod]
         public void IsValid_MissingWhen_ThrowsConfigurationException()
         {
             var entity = new Entity("account");

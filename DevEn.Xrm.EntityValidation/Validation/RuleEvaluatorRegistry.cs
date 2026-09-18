@@ -51,6 +51,7 @@ namespace DevEn.Xrm.EntityValidation.Validation
                 new AllowedValuesRuleEvaluator(),
                 new FieldComparisonRuleEvaluator(),
                 new DateRangeRuleEvaluator(),
+                new ExpressionRuleEvaluator(),
                 new AtLeastOneOfRuleEvaluator(),
                 new UniquenessRuleEvaluator(),
                 new RelatedRecordStateRuleEvaluator(),

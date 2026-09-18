@@ -9,7 +9,7 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 |---|---|
 | Target framework | .NET Framework 4.6.2 (`net462`) — the supported Dataverse plugin sandbox target |
 | Configuration storage | Out-of-the-box `msdyn_configuration` ("Configuration") table |
-| Built-in rule types | 11 (see [Rule type reference](#rule-type-reference)) |
+| Built-in rule types | 12 (see [Rule type reference](#rule-type-reference)) |
 | Configuration granularity | One JSON array per target entity, one object per rule (field/message/stage/type/parameters) |
 | Missing configuration | Silently skipped (no rules configured = no validation, not an error) |
 | Broken configuration | Fails loudly with a clear error (malformed JSON is a real mistake to fix) |
@@ -162,6 +162,7 @@ compose with a separate `Required` rule on the same field to also enforce its pr
 | `AllowedValues` | Value must be one of a fixed list | `values` (required array), `caseSensitive` (optional, default `false`) |
 | `FieldComparison` | Compare the field to another field on the same record | `compareToAttribute` (required), `operator` (required) |
 | `DateRange` | Date/time value within bounds | `min`, `max` (both optional, absolute or relative) |
+| `Expression` | Evaluate a boolean/arithmetic expression over the record's fields | `expression` (required) |
 | `AtLeastOneOf` | At least N of several fields must be populated | `fields` (required array), `minimumRequired` (optional, default `1`) |
 | `Conditional` | Apply another rule only if a condition holds | `when` (required), `then` (required) |
 | `Uniqueness` | No other record may share this field's value | `scopeFields` (optional array) |
@@ -242,6 +243,64 @@ relative token evaluated against UTC "now": `Today`, `Now`, `Today+Nd`/`Today-Nd
 { "message": "Create", "stage": "PreOperation", "field": "new_contractstartdate", "ruleType": "DateRange",
   "parameters": { "min": "Today", "max": "Today+365d" },
   "errorMessage": "The contract start date must be within the next year." }
+```
+
+### Expression
+
+`{"expression": "..."}`. Evaluates a small boolean/arithmetic expression against the record's fields —
+a generalization of `FieldComparison` and `DateRange` for the compound conditions those two can't express
+in a single rule: offset comparisons between two fields, AND/OR combinations, and arithmetic between fields.
+
+Grammar, low to high precedence: `||`, `&&`, unary `!`, non-chaining comparisons
+(`== != > >= < <=`), additive (`+ -`), multiplicative (`* /`), unary `-`, and parenthesized
+sub-expressions. Field names are bare identifiers (e.g. `creditlimit`); text literals use `'...'` or
+`"..."` (single quotes are recommended since `expression` itself sits inside a JSON string); `Today`,
+`Now`, `Today+30d`, `Today-1y` and absolute ISO dates are recognized the same way as in `DateRange`
+(see `DateTokenParser`); `true`/`false` are case-insensitive boolean literals.
+
+Semantics:
+
+- Comparisons reuse the exact type-compatibility rules as `FieldComparison` (numeric/numeric,
+  date/date, or strict text/text); comparing incompatible types throws `ValidationConfigurationException`.
+- `date ± number` offsets the date by that many days; `date − date` yields the numeric day difference;
+  `date + date` throws; dividing by zero throws.
+- If either side of a comparison is `null`/absent, that comparison is vacuously satisfied (`true`) —
+  consistent with every other rule type's "absent field ⇒ satisfied" convention.
+- The expression's overall result must be boolean: an expression that evaluates to a raw number, string,
+  date, or an absent field used directly (not through a comparison) throws
+  `ValidationConfigurationException` rather than guessing.
+- Guarded against pathological configuration: the `expression` string is capped at 500 characters, and
+  nesting (parentheses, unary operator chains) is capped at 20 levels; both throw
+  `ValidationConfigurationException` when exceeded.
+
+```json
+{ "message": "Update", "stage": "PreOperation", "field": "fieldA", "ruleType": "Expression",
+  "parameters": { "expression": "fieldA == fieldB" },
+  "errorMessage": "Field A and Field B must match." }
+```
+
+```json
+{ "message": "Create", "stage": "PreOperation", "field": "somedate", "ruleType": "Expression",
+  "parameters": { "expression": "somedate >= Today" },
+  "errorMessage": "The date cannot be in the past." }
+```
+
+```json
+{ "message": "Update", "stage": "PreOperation", "field": "dateA", "ruleType": "Expression",
+  "parameters": { "expression": "dateA <= dateB + 30" },
+  "errorMessage": "Date A must be within 30 days of Date B." }
+```
+
+```json
+{ "message": "Create", "stage": "PreOperation", "field": "paese", "ruleType": "Expression",
+  "parameters": { "expression": "tipo == 'Cliente' && paese == 'IT'" },
+  "errorMessage": "Italian customers only." }
+```
+
+```json
+{ "message": "Update", "stage": "PreOperation", "field": "importo", "ruleType": "Expression",
+  "parameters": { "expression": "importo <= creditlimit * 1.1" },
+  "errorMessage": "Amount exceeds the credit limit by more than 10%." }
 ```
 
 ### AtLeastOneOf
