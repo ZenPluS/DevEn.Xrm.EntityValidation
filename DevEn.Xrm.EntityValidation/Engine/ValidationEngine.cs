@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xrm.Sdk;
 using DevEn.Xrm.EntityValidation.Configuration;
+using DevEn.Xrm.EntityValidation.Model;
 using DevEn.Xrm.EntityValidation.Repository;
 using DevEn.Xrm.EntityValidation.Validation;
 
@@ -45,14 +46,37 @@ namespace DevEn.Xrm.EntityValidation.Engine
                 throw new ArgumentNullException(nameof(effectiveEntity));
             }
 
-            var rules = _repository.GetActiveRules(entityLogicalName, messageName, stage);
-            if (rules.Count == 0)
+            var outcome = Evaluate(effectiveEntity, _repository.GetActiveRules(entityLogicalName, messageName, stage));
+            if (outcome.IsValid)
             {
                 return;
             }
 
+            throw new InvalidPluginExecutionException(string.Join(Environment.NewLine, outcome.Messages));
+        }
+
+        /// <summary>
+        /// Evaluates every active rule configured for the entity, whatever message or stage it was written
+        /// for, and reports the outcome instead of throwing: this is the on-demand path (a "Validate"
+        /// button), where the caller wants the list of problems, not a blocked operation. Configuration
+        /// mistakes still throw, because they are not the record's fault.
+        /// </summary>
+        public ValidationOutcome ValidateAll(Entity effectiveEntity, string entityLogicalName)
+        {
+            if (effectiveEntity == null)
+            {
+                throw new ArgumentNullException(nameof(effectiveEntity));
+            }
+
+            return Evaluate(effectiveEntity, _repository.GetAllActiveRules(entityLogicalName));
+        }
+
+        private ValidationOutcome Evaluate(Entity effectiveEntity, IReadOnlyList<ValidationRuleDefinition> rules)
+        {
             var errorMessages = new List<string>();
+            var failedRuleIds = new List<string>();
             var configurationErrors = new List<string>();
+
             foreach (var rule in rules)
             {
                 bool isValid;
@@ -88,6 +112,7 @@ namespace DevEn.Xrm.EntityValidation.Engine
                     : rule.ErrorMessage;
 
                 errorMessages.Add(message);
+                failedRuleIds.Add(rule.RuleId);
             }
 
             if (configurationErrors.Count > 0)
@@ -95,12 +120,7 @@ namespace DevEn.Xrm.EntityValidation.Engine
                 throw new ValidationConfigurationException(string.Join(Environment.NewLine, configurationErrors.Distinct()));
             }
 
-            if (errorMessages.Count == 0)
-            {
-                return;
-            }
-
-            throw new InvalidPluginExecutionException(string.Join(Environment.NewLine, errorMessages.Distinct()));
+            return new ValidationOutcome(errorMessages.Distinct().ToList(), failedRuleIds);
         }
     }
 }

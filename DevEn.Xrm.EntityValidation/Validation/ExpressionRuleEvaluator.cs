@@ -31,14 +31,19 @@ namespace DevEn.Xrm.EntityValidation.Validation
         {
             var condition = ConditionCompiler.Compile(rule);
 
-            var knownAttributes = EntityAttributeCache.TryGetAttributeNames(context, rule.TargetEntityLogicalName);
+            var knownAttributes = EntityAttributeCache.TryGetAttributes(
+                context.OrganizationService,
+                context.OrganizationId,
+                context.TracingService,
+                rule.TargetEntityLogicalName);
+
             if (knownAttributes == null)
             {
                 return;
             }
 
             var unknownAttributes = ConditionCompiler.CollectFieldNames(condition)
-                .Where(fieldName => !knownAttributes.Contains(fieldName))
+                .Where(fieldName => !knownAttributes.ContainsKey(fieldName))
                 .OrderBy(fieldName => fieldName)
                 .ToList();
 

@@ -14,7 +14,7 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 | Missing configuration | Silently skipped (no rules configured = no validation, not an error) |
 | Broken configuration | Fails loudly with a clear error (malformed JSON is a real mistake to fix) |
 | Packaging | Shared project (`.shproj`): the sources compile into your own plugin assembly, no extra DLL to deploy |
-| Entry point | `DevEn.Xrm.EntityValidation.Execution.ValidationChainRunner` — called from the `IPlugin` class you declare |
+| Entry point | `Execution.ValidationChainRunner` (pipeline) and `Execution.OnDemandValidationRunner` (Custom API / "Validate" button) — both called from an `IPlugin` class you declare |
 
 ## Table of contents
 
@@ -24,6 +24,7 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 - [Rule type reference](#rule-type-reference)
 - [Supported Dataverse messages and pipeline stages](#supported-dataverse-messages-and-pipeline-stages)
 - [Using it in your plugin assembly](#using-it-in-your-plugin-assembly)
+- [Validating on demand (Custom API)](#validating-on-demand-custom-api)
 - [Error handling and validation messages](#error-handling-and-validation-messages)
 - [Caching](#caching)
 - [Security model](#security-model)
@@ -69,7 +70,9 @@ flowchart TD
 
 | Component | Responsibility |
 |---|---|
-| `Execution.ValidationChainRunner` | Public entry point. Runs the whole chain for one plugin execution and translates exceptions into safe, user-facing messages. |
+| `Execution.ValidationChainRunner` | Public entry point for the pipeline. Runs the whole chain for one plugin execution and translates exceptions into safe, user-facing messages. |
+| `Execution.OnDemandValidationRunner` | Public entry point for a Custom API: validates a record outside any operation and reports the outcome instead of blocking. |
+| `Execution.RecordDataReader` | Turns the `{"attribute": value}` JSON a client sends into properly typed SDK values, using the entity's attribute metadata. |
 | `Execution.LocalPluginContext` | Exposes the platform-provided services, split into an elevated system service (configuration reads) and the calling user's own service (rule evaluation). |
 | `Execution.TargetEntityResolver` | Rebuilds the "effective" `Entity` to validate from whichever shape the current message uses (`Target` as `Entity`, `Target` as `EntityReference`, or `EntityMoniker`), merged with the Pre-Image when registered. |
 | `Repository.DataverseValidationRuleRepository` | Reads and parses the JSON rules configured for a given target entity, with caching and the silent-fallback/loud-failure behavior described below. Also checks every rule's configuration while loading it. |
@@ -514,6 +517,101 @@ existing plugin project instead of adding a dependency to it.
 One plugin class is enough for the whole environment: "one or more generic plugins" is achieved as
 "one class, many step registrations", never one class per entity.
 
+## Validating on demand (Custom API)
+
+Same rules, same engine, triggered by the user instead of by an operation — a **Validate** button on a
+form, for instance. `OnDemandValidationRunner` differs from the pipeline runner in three ways:
+
+- it evaluates **every active rule of the entity**, whatever message or stage it was configured for, so the
+  button reuses the rules already written for `Create`/`Update` without duplicating them;
+- it **reports** the outcome in the output parameters instead of throwing, so the caller can display the
+  problems in its own UI;
+- it rebuilds the record as **stored row + values sent by the caller** (the caller's values win), which is
+  what makes the button work on a record with unsaved changes, or on one that was never saved at all. The
+  stored row is read with the calling user's own service, so nobody validates against values they can't read.
+
+### Custom API definition
+
+| | |
+|---|---|
+| Binding | Bound to the table (the platform then passes `Target` by itself) or Global/unbound |
+| Plugin type | your `IPlugin` class calling `OnDemandValidationRunner` |
+| Allowed custom processing step type | None (nothing should extend a validation call) |
+
+Request parameters — send `Target`, **or** `EntityName` (+ `RecordId` when the record exists):
+
+| Name | Type | Notes |
+|---|---|---|
+| `Target` | EntityReference | Automatic for a table-bound Custom API |
+| `EntityName` | String | Unbound alternative: the table's logical name |
+| `RecordId` | String / Guid | Optional; omit it for a record that doesn't exist yet |
+| `Record` | Entity | Optional: current values, already typed by the platform |
+| `RecordData` | String | Optional: current values as a `{"attributelogicalname": value}` JSON object |
+
+Response properties:
+
+| Name | Type | Notes |
+|---|---|---|
+| `IsValid` | Boolean | `false` as soon as one rule fails |
+| `Messages` | String | The failed rules' messages, one per line |
+| `FailedRuleIds` | StringArray | The `id` of each failed rule, to highlight fields for instance |
+
+### Plugin class
+
+```csharp
+public sealed class ValidateRecordApi : IPlugin
+{
+    private static readonly OnDemandValidationRunner Runner = new OnDemandValidationRunner();
+
+    public void Execute(IServiceProvider serviceProvider)
+    {
+        Runner.Run(serviceProvider);
+    }
+}
+```
+
+### Calling it from a form
+
+`RecordData` accepts the values exactly as the form API returns them — including the
+`[{ id, name, entityType }]` array of a lookup and the ISO string of a date — so collecting the current
+state of the form is a one-liner:
+
+```javascript
+const data = {};
+formContext.data.entity.attributes.forEach(a => { data[a.getName()] = a.getValue(); });
+
+const request = {
+    entity: { entityType: "account", id: formContext.data.entity.getId() },
+    RecordData: JSON.stringify(data),
+    getMetadata: () => ({
+        boundParameter: "entity",
+        parameterTypes: {
+            entity: { typeName: "mscrm.account", structuralProperty: 5 },
+            RecordData: { typeName: "Edm.String", structuralProperty: 1 }
+        },
+        operationType: 0,
+        operationName: "deven_ValidateRecord"
+    })
+};
+
+const response = await Xrm.WebApi.online.execute(request);
+const result = await response.json();
+if (!result.IsValid) {
+    Xrm.Navigation.openAlertDialog({ text: result.Messages });
+}
+```
+
+Values are converted back to their SDK types (`OptionSetValue`, `Money`, `EntityReference`, `DateTime`...)
+from the entity's attribute metadata, cached for 30 minutes. Two consequences worth knowing:
+
+- an attribute name that doesn't exist on the table is **rejected** rather than ignored, because silently
+  dropping it would validate a record that isn't the one on screen;
+- if the metadata can't be read in that environment, the call fails loudly instead of interpreting the
+  payload by guesswork.
+
+A rule the caller's payload can't reach — one that reads a field absent from both the form and the stored
+row — behaves as everywhere else: an absent attribute counts as satisfied.
+
 ## Error handling and validation messages
 
 - **All** rules configured for the current entity/message/stage are evaluated in a single pass — not just
@@ -597,7 +695,7 @@ DevEn.Xrm.EntityValidation/                Shared project (no assembly of its ow
   Validation/                              IRuleEvaluator, all rule evaluators, RuleEvaluatorRegistry, shared helpers
   Validation/Conditions/                   Compiler and evaluator of the Expression rule's condition tree
   Engine/                                  ValidationEngine
-  Execution/                               ValidationChainRunner, LocalPluginContext, TargetEntityResolver
+  Execution/                               ValidationChainRunner, OnDemandValidationRunner, RecordDataReader, LocalPluginContext, TargetEntityResolver
 DevEn.Xrm.EntityValidation.Tests/          MSTest + FakeXrmEasy test project, mirroring the folder layout above
 ```
 

@@ -93,6 +93,18 @@ namespace DevEn.Xrm.EntityValidation.Repository
                 .ToList();
         }
 
+        public IReadOnlyList<ValidationRuleDefinition> GetAllActiveRules(string targetEntityLogicalName)
+        {
+            if (string.IsNullOrWhiteSpace(targetEntityLogicalName))
+            {
+                throw new ArgumentException("The target entity is required.", nameof(targetEntityLogicalName));
+            }
+
+            return GetAllRulesForEntity(targetEntityLogicalName)
+                .OrderBy(rule => rule.ExecutionOrder)
+                .ToList();
+        }
+
         private IReadOnlyList<ValidationRuleDefinition> GetAllRulesForEntity(string targetEntityLogicalName)
         {
             // The organization id is part of the key because the cache is static: a sandbox worker

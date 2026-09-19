@@ -26,6 +26,11 @@ namespace DevEn.Xrm.EntityValidation.Tests.Engine
             {
                 return _rules;
             }
+
+            public IReadOnlyList<ValidationRuleDefinition> GetAllActiveRules(string targetEntityLogicalName)
+            {
+                return _rules;
+            }
         }
 
         [TestMethod]

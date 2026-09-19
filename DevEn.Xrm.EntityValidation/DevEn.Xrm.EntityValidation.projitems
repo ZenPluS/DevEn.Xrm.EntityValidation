@@ -13,7 +13,10 @@
     <Compile Include="$(MSBuildThisFileDirectory)Configuration\PipelineStage.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Configuration\ValidationConfigurationException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Engine\ValidationEngine.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Engine\ValidationOutcome.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Execution\LocalPluginContext.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Execution\OnDemandValidationRunner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Execution\RecordDataReader.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Execution\TargetEntityResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Execution\ValidationChainRunner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Model\ValidationRuleDefinition.cs" />
