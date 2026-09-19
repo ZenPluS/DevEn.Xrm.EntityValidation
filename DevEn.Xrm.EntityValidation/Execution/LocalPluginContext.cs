@@ -1,7 +1,7 @@
 using System;
 using Microsoft.Xrm.Sdk;
 
-namespace DevEn.Xrm.EntityValidation.Plugin
+namespace DevEn.Xrm.EntityValidation.Execution
 {
     /// <summary>
     /// Extracts and groups the services a Dataverse plugin typically needs from the platform-provided

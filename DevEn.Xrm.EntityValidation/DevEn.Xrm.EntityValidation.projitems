@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>{90ae0a5c-df28-4ed3-b80f-b047f920f78c}</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>DevEn.Xrm.EntityValidation</Import_RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Caching\ExpiringCache.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Configuration\PipelineStage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Configuration\ValidationConfigurationException.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Engine\ValidationEngine.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Execution\LocalPluginContext.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Execution\TargetEntityResolver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Execution\ValidationChainRunner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Model\ValidationRuleDefinition.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repository\DataverseValidationRuleRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repository\IValidationRuleRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\AllowedValuesRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\AtLeastOneOfRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\AttributeValueConverter.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\ComparisonEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\ComparisonOperator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\ConditionalRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\Conditions\ConditionCompiler.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\Conditions\ConditionEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\Conditions\ConditionNode.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\DateRangeRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\DateTokenParser.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\EntityAttributeCache.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\ExpressionRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\FieldComparisonRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\IRuleConfigurationValidator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\IRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\RangeRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\RegexRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\RelatedRecordStateRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\RequiredRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\RuleEvaluatorRegistry.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\RuleParameters.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\StringLengthRuleEvaluator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Validation\UniquenessRuleEvaluator.cs" />
+  </ItemGroup>
+</Project>

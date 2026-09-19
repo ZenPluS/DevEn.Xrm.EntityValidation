@@ -5,32 +5,39 @@ using DevEn.Xrm.EntityValidation.Engine;
 using DevEn.Xrm.EntityValidation.Repository;
 using DevEn.Xrm.EntityValidation.Validation;
 
-namespace DevEn.Xrm.EntityValidation.Plugin
+namespace DevEn.Xrm.EntityValidation.Execution
 {
     /// <summary>
-    /// Generic, reusable plugin: registrable on any entity/message/stage (Create, Update, SetState,
-    /// SetStateDynamicEntity, Delete, Assign...). Applies the validation rules configured in D365 for that
-    /// specific combination, with no entity-specific code.
+    /// Runs the whole validation chain for one plugin execution: takes the services the platform provides,
+    /// loads the rules configured for the current entity, rebuilds the record to validate and evaluates
+    /// every rule matching the current message/stage, turning failures into a message the end user can act on.
     ///
-    /// The same class must be registered once per entity/message/stage combination to validate (via the
-    /// Plugin Registration Tool): "one or more plugins" in the D365 domain sense translates to "one class,
-    /// many registrations".
+    /// This code ships no <c>IPlugin</c> of its own: the host assembly declares its own plugin class -
+    /// registered once per entity/message/stage combination - and forwards to this runner:
+    /// <code>
+    /// public sealed class AccountValidationPlugin : IPlugin
+    /// {
+    ///     private static readonly ValidationChainRunner Runner = new ValidationChainRunner();
     ///
-    /// Rules are read from the out-of-the-box "Configuration" (msdyn_configuration) table: see
-    /// <see cref="Repository.DataverseValidationRuleRepository"/> for the exact row/column layout.
+    ///     public void Execute(IServiceProvider serviceProvider)
+    ///     {
+    ///         Runner.Run(serviceProvider);
+    ///     }
+    /// }
+    /// </code>
+    /// The runner keeps no per-execution state, so a single instance can serve every execution and thread
+    /// of a step; building it once avoids rebuilding the evaluator registry on each call.
     /// </summary>
-    public sealed class GenericValidationPlugin : IPlugin
+    public sealed class ValidationChainRunner
     {
         private readonly RuleEvaluatorRegistry _registry;
 
-        public GenericValidationPlugin(string unsecureConfiguration, string secureConfiguration)
+        public ValidationChainRunner()
         {
-            // Neither parameter is currently used (no configuration/secrets required), but both are kept
-            // to match the standard constructor signature recognized by the Plugin Registration Tool.
             _registry = RuleEvaluatorRegistry.CreateDefault();
         }
 
-        public void Execute(IServiceProvider serviceProvider)
+        public void Run(IServiceProvider serviceProvider)
         {
             if (serviceProvider == null)
             {
@@ -57,13 +64,15 @@ namespace DevEn.Xrm.EntityValidation.Plugin
             }
             catch (ValidationConfigurationException ex)
             {
+                // The details (rule ids, field logical names, regex patterns...) only go to the trace log:
+                // the end user who triggered the operation has no use for them and shouldn't see them.
                 tracingService.Trace("Validation configuration error: {0}", ex);
                 throw new InvalidPluginExecutionException(
                     "The validation configuration for this record is not valid. Contact your system administrator.", ex);
             }
             catch (Exception ex)
             {
-                tracingService.Trace("Unexpected error in the validation plugin: {0}", ex);
+                tracingService.Trace("Unexpected error during validation: {0}", ex);
                 throw new InvalidPluginExecutionException(
                     "An unexpected error occurred during validation. Contact your system administrator.", ex);
             }

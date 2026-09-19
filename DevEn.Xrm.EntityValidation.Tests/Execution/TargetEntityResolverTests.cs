@@ -1,13 +1,13 @@
 using System;
 using System.Linq;
 using DevEn.Xrm.EntityValidation.Configuration;
-using DevEn.Xrm.EntityValidation.Plugin;
+using DevEn.Xrm.EntityValidation.Execution;
 using DevEn.Xrm.EntityValidation.Tests.TestHelpers;
 using FakeXrmEasy;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Xrm.Sdk;
 
-namespace DevEn.Xrm.EntityValidation.Tests.Plugin
+namespace DevEn.Xrm.EntityValidation.Tests.Execution
 {
     [TestClass]
     public class TargetEntityResolverTests

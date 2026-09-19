@@ -2,7 +2,7 @@ using System;
 using Microsoft.Xrm.Sdk;
 using DevEn.Xrm.EntityValidation.Configuration;
 
-namespace DevEn.Xrm.EntityValidation.Plugin
+namespace DevEn.Xrm.EntityValidation.Execution
 {
     /// <summary>
     /// Rebuilds the "effective" entity to validate from the plugin execution context, handling the

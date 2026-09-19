@@ -10,15 +10,22 @@
     <NoWarn>CS0618</NoWarn>
   </PropertyGroup>
 
+  <!-- The library is a shared project: its sources compile straight into this assembly, which is also
+       why the tests reach its internal types without any InternalsVisibleTo. -->
+  <Import Project="..\DevEn.Xrm.EntityValidation\DevEn.Xrm.EntityValidation.projitems" Label="Shared" />
+
+  <ItemGroup>
+    <!-- Dependencies of the shared code: a shared project carries no package reference of its own, every
+         consuming assembly has to provide them. -->
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="MSTest.TestAdapter" Version="3.6.4" />
     <PackageReference Include="MSTest.TestFramework" Version="3.6.4" />
     <PackageReference Include="FakeXrmEasy.9" Version="1.58.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\DevEn.Xrm.EntityValidation\DevEn.Xrm.EntityValidation.csproj" />
   </ItemGroup>
 
 </Project>

@@ -13,7 +13,8 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 | Configuration granularity | One JSON array per target entity, one object per rule (field/message/stage/type/parameters) |
 | Missing configuration | Silently skipped (no rules configured = no validation, not an error) |
 | Broken configuration | Fails loudly with a clear error (malformed JSON is a real mistake to fix) |
-| Plugin class | `DevEn.Xrm.EntityValidation.Plugin.GenericValidationPlugin` — one class, many step registrations |
+| Packaging | Shared project (`.shproj`): the sources compile into your own plugin assembly, no extra DLL to deploy |
+| Entry point | `DevEn.Xrm.EntityValidation.Execution.ValidationChainRunner` — called from the `IPlugin` class you declare |
 
 ## Table of contents
 
@@ -22,7 +23,7 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 - [Configuration model](#configuration-model)
 - [Rule type reference](#rule-type-reference)
 - [Supported Dataverse messages and pipeline stages](#supported-dataverse-messages-and-pipeline-stages)
-- [Registering the plugin](#registering-the-plugin)
+- [Using it in your plugin assembly](#using-it-in-your-plugin-assembly)
 - [Error handling and validation messages](#error-handling-and-validation-messages)
 - [Caching](#caching)
 - [Security model](#security-model)
@@ -34,13 +35,13 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 ## Overview
 
 Traditionally, validating a Dataverse entity's fields means writing (and maintaining, and redeploying) a
-dedicated plugin per entity. `DevEn.Xrm.EntityValidation` replaces that with a single generic plugin class
-that is registered once per entity/message/stage combination and reads *what* to validate from a
+dedicated plugin per entity. `DevEn.Xrm.EntityValidation` replaces that with a single validation chain
+that you register once per entity/message/stage combination and that reads *what* to validate from a
 Dataverse configuration row at execution time.
 
 Design principles:
 
-- **No entity-specific code.** The same assembly and the same plugin class validate every entity; only
+- **No entity-specific code.** The same code and the same plugin class validate every entity; only
   the configuration changes.
 - **Configuration lives in Dataverse**, editable without a deployment (a JSON array of rule objects on a
   `msdyn_configuration` row).
@@ -54,7 +55,7 @@ Design principles:
 
 ```mermaid
 flowchart TD
-    A["Dataverse event: Create / Update / SetState / Delete / Assign / ..."] --> B["GenericValidationPlugin.Execute"]
+    A["Dataverse event: Create / Update / SetState / Delete / Assign / ..."] --> B["Your IPlugin → ValidationChainRunner.Run"]
     B --> C["TargetEntityResolver: builds the effective Entity (Target + Pre-Image merge)"]
     B --> D["DataverseValidationRuleRepository (5-minute cache, elevated service)"]
     D --> E[("msdyn_configuration")]
@@ -68,9 +69,9 @@ flowchart TD
 
 | Component | Responsibility |
 |---|---|
-| `Plugin.GenericValidationPlugin` | Public `IPlugin` entry point. Wires the other components together and translates exceptions into safe, user-facing messages. |
-| `Plugin.LocalPluginContext` | Exposes the platform-provided services, split into an elevated system service (configuration reads) and the calling user's own service (rule evaluation). |
-| `Plugin.TargetEntityResolver` | Rebuilds the "effective" `Entity` to validate from whichever shape the current message uses (`Target` as `Entity`, `Target` as `EntityReference`, or `EntityMoniker`), merged with the Pre-Image when registered. |
+| `Execution.ValidationChainRunner` | Public entry point. Runs the whole chain for one plugin execution and translates exceptions into safe, user-facing messages. |
+| `Execution.LocalPluginContext` | Exposes the platform-provided services, split into an elevated system service (configuration reads) and the calling user's own service (rule evaluation). |
+| `Execution.TargetEntityResolver` | Rebuilds the "effective" `Entity` to validate from whichever shape the current message uses (`Target` as `Entity`, `Target` as `EntityReference`, or `EntityMoniker`), merged with the Pre-Image when registered. |
 | `Repository.DataverseValidationRuleRepository` | Reads and parses the JSON rules configured for a given target entity, with caching and the silent-fallback/loud-failure behavior described below. Also checks every rule's configuration while loading it. |
 | `Caching.ExpiringCache` | Static, thread-safe, expiring in-memory cache shared by the parsed rules (5 minutes) and the entity metadata (30 minutes), keyed per organization. |
 | `Engine.ValidationEngine` | Evaluates every rule matching the current entity/message/stage and aggregates all failures into a single exception. |
@@ -454,30 +455,63 @@ Pipeline stages (`Configuration.PipelineStage`), with the numeric values expecte
 Availability of a given stage for a given message is governed by the Dataverse platform itself, not by
 this library.
 
-## Registering the plugin
+## Using it in your plugin assembly
 
-1. Build the solution (Release configuration recommended) to produce `DevEn.Xrm.EntityValidation.dll`.
-2. Register the assembly with the Plugin Registration Tool, **Isolation Mode: Sandbox**.
-3. For each entity/message/stage combination that needs validation, register a new step on
-   `DevEn.Xrm.EntityValidation.Plugin.GenericValidationPlugin`:
+This is a **shared project**: it builds no DLL of its own, its sources are compiled directly into the
+plugin assembly that consumes it. One assembly to sign, deploy and register, and the code merges into an
+existing plugin project instead of adding a dependency to it.
+
+1. Reference the shared project from your plugin project:
+   - Visual Studio: right-click the project → **Add** → **Shared Project Reference** →
+     `DevEn.Xrm.EntityValidation`.
+   - or by hand, in your `.csproj`:
+
+     ```xml
+     <Import Project="..\DevEn.Xrm.EntityValidation\DevEn.Xrm.EntityValidation.projitems" Label="Shared" />
+     ```
+
+2. Add the packages the shared code needs to **your** project — a shared project carries no package
+   reference of its own: `Microsoft.CrmSdk.CoreAssemblies` and `Newtonsoft.Json`.
+3. Declare your own plugin class and forward to the runner:
+
+   ```csharp
+   using System;
+   using DevEn.Xrm.EntityValidation.Execution;
+   using Microsoft.Xrm.Sdk;
+
+   public sealed class EntityValidationPlugin : IPlugin
+   {
+       private static readonly ValidationChainRunner Runner = new ValidationChainRunner();
+
+       public void Execute(IServiceProvider serviceProvider)
+       {
+           Runner.Run(serviceProvider);
+       }
+   }
+   ```
+
+   The runner keeps no per-execution state, so one shared instance serves every step and thread and avoids
+   rebuilding the evaluator registry on each call.
+4. Build (Release recommended) and register the assembly with the Plugin Registration Tool,
+   **Isolation Mode: Sandbox**.
+5. For each entity/message/stage combination that needs validation, register a step on your plugin class:
    - **Message**: the Dataverse message to validate (`Create`, `Update`, `SetState`, ...).
    - **Primary Entity**: the target entity's logical name.
    - **Stage**: matching a `stage` value used by the rules configured for that entity (Pre-validation /
      Pre-operation / Post-operation).
    - **Execution Mode**: Synchronous (validation must block the operation on failure).
-   - **Unsecure Configuration** / **Secure Configuration**: leave both blank; the constructor accepts them
-     only to match the standard signature recognized by the Plugin Registration Tool, neither is used.
-4. If any configured rule reads a field that might not be part of the message's `Target` (any attribute on
+   - **Unsecure Configuration** / **Secure Configuration**: not used, leave both blank.
+6. If any configured rule reads a field that might not be part of the message's `Target` (any attribute on
    `Delete`/`Assign`/`SetState`, or an unchanged attribute on `Update`), register a **Pre-Image** named
    exactly `PreImage` on that step, including at least the attributes referenced by the configured rules.
-   Without it those rules pass silently (an absent attribute counts as satisfied); the plugin traces a
+   Without it those rules pass silently (an absent attribute counts as satisfied); the runner traces a
    warning on every non-`Create` message with no Pre-Image registered, so check the trace log first when
    validation seems not to run.
-5. Create (or activate) the `msdyn_configuration` row for the entity, as described in
+7. Create (or activate) the `msdyn_configuration` row for the entity, as described in
    [Configuration model](#configuration-model). Without it, the step runs but finds no rules and does
    nothing.
 
-The same plugin class is reused across every registration: "one or more generic plugins" is achieved as
+One plugin class is enough for the whole environment: "one or more generic plugins" is achieved as
 "one class, many step registrations", never one class per entity.
 
 ## Error handling and validation messages
@@ -553,7 +587,9 @@ No other component needs to change: the repository, engine and plugin are all ru
 
 ```
 DevEn.Xrm.EntityValidation.slnx
-DevEn.Xrm.EntityValidation/                Main plugin assembly (net462, class library)
+DevEn.Xrm.EntityValidation/                Shared project (no assembly of its own)
+  DevEn.Xrm.EntityValidation.shproj        Shared project, for Visual Studio
+  DevEn.Xrm.EntityValidation.projitems     The file list consumers import
   Caching/                                 ExpiringCache
   Configuration/                           PipelineStage enum, ValidationConfigurationException
   Model/                                   ValidationRuleDefinition
@@ -561,9 +597,13 @@ DevEn.Xrm.EntityValidation/                Main plugin assembly (net462, class l
   Validation/                              IRuleEvaluator, all rule evaluators, RuleEvaluatorRegistry, shared helpers
   Validation/Conditions/                   Compiler and evaluator of the Expression rule's condition tree
   Engine/                                  ValidationEngine
-  Plugin/                                  GenericValidationPlugin, LocalPluginContext, TargetEntityResolver
+  Execution/                               ValidationChainRunner, LocalPluginContext, TargetEntityResolver
 DevEn.Xrm.EntityValidation.Tests/          MSTest + FakeXrmEasy test project, mirroring the folder layout above
 ```
+
+The test project consumes the shared project exactly the way a plugin assembly does (a single
+`<Import ... Label="Shared" />`), which is also why it can exercise the internal types directly without
+any `InternalsVisibleTo`.
 
 ## Requirements
 
@@ -573,6 +613,9 @@ DevEn.Xrm.EntityValidation.Tests/          MSTest + FakeXrmEasy test project, mi
 | Microsoft.CrmSdk.CoreAssemblies | 9.0.2.60 |
 | Newtonsoft.Json | 13.0.3 |
 | Dataverse environment | Field Service / Universal Resource Scheduling solution installed (provides the `msdyn_configuration` table) |
+
+The two packages are listed for the **consuming** project: a shared project declares no package reference,
+so the assembly that imports it has to provide them.
 
 Test project only:
 
@@ -591,5 +634,6 @@ dotnet build DevEn.Xrm.EntityValidation.slnx
 dotnet test DevEn.Xrm.EntityValidation.slnx
 ```
 
-Both the main assembly and the test project target `net462`; no additional runtime needs to be installed
-beyond the .NET Framework 4.6.2 developer pack and the .NET SDK used to drive `dotnet build`/`dotnet test`.
+A shared project is never built on its own: the sources are compiled (and therefore type-checked) by the
+test project, which is the only assembly the solution produces. No additional runtime is needed beyond the
+.NET Framework 4.6.2 developer pack and the .NET SDK used to drive `dotnet build`/`dotnet test`.

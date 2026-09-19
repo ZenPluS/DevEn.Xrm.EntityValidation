@@ -1,19 +1,21 @@
 using System;
 using System.Collections.Generic;
 using DevEn.Xrm.EntityValidation.Configuration;
+using DevEn.Xrm.EntityValidation.Execution;
 using DevEn.Xrm.EntityValidation.Tests.TestHelpers;
 using FakeXrmEasy;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Xrm.Sdk;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using PluginType = DevEn.Xrm.EntityValidation.Plugin.GenericValidationPlugin;
 
-namespace DevEn.Xrm.EntityValidation.Tests.Plugin
+namespace DevEn.Xrm.EntityValidation.Tests.Execution
 {
     [TestClass]
-    public class GenericValidationPluginTests
+    public class ValidationChainRunnerTests
     {
+        private readonly ValidationChainRunner _runner = new ValidationChainRunner();
+
         private static Entity CreateConfigurationRow(string targetEntityLogicalName, string message, string stage, string field, string ruleType, string errorMessage)
         {
             var rules = new JArray
@@ -40,8 +42,19 @@ namespace DevEn.Xrm.EntityValidation.Tests.Plugin
             return new FakeServiceProvider(pluginExecutionContext, context.GetOrganizationService(), new FakeTracingService());
         }
 
+        private static XrmFakedPluginExecutionContext BuildPluginContext(XrmFakedContext context, string entityName, Entity target)
+        {
+            var pluginContext = context.GetDefaultPluginContext();
+            pluginContext.MessageName = "Create";
+            pluginContext.Stage = (int)PipelineStage.PreOperation;
+            pluginContext.PrimaryEntityName = entityName;
+            pluginContext.OrganizationId = Guid.NewGuid();
+            pluginContext.InputParameters["Target"] = target;
+            return pluginContext;
+        }
+
         [TestMethod]
-        public void Execute_RequiredFieldMissing_ThrowsWithConfiguredMessage()
+        public void Run_RequiredFieldMissing_ThrowsWithConfiguredMessage()
         {
             var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
             var context = new XrmFakedContext();
@@ -50,23 +63,16 @@ namespace DevEn.Xrm.EntityValidation.Tests.Plugin
                 CreateConfigurationRow(entityName, "Create", "PreOperation", "name", "Required", "The name is required.")
             });
 
-            var pluginContext = context.GetDefaultPluginContext();
-            pluginContext.MessageName = "Create";
-            pluginContext.Stage = (int)PipelineStage.PreOperation;
-            pluginContext.PrimaryEntityName = entityName;
-            pluginContext.OrganizationId = Guid.NewGuid();
-            pluginContext.InputParameters["Target"] = new Entity(entityName);
-
-            var plugin = new PluginType(null, null);
+            var pluginContext = BuildPluginContext(context, entityName, new Entity(entityName));
 
             var exception = Assert.ThrowsException<InvalidPluginExecutionException>(
-                () => plugin.Execute(BuildServiceProvider(context, pluginContext)));
+                () => _runner.Run(BuildServiceProvider(context, pluginContext)));
 
             Assert.AreEqual("The name is required.", exception.Message);
         }
 
         [TestMethod]
-        public void Execute_AllRulesSatisfied_DoesNotThrow()
+        public void Run_AllRulesSatisfied_DoesNotThrow()
         {
             var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
             var context = new XrmFakedContext();
@@ -75,39 +81,25 @@ namespace DevEn.Xrm.EntityValidation.Tests.Plugin
                 CreateConfigurationRow(entityName, "Create", "PreOperation", "name", "Required", "The name is required.")
             });
 
-            var pluginContext = context.GetDefaultPluginContext();
-            pluginContext.MessageName = "Create";
-            pluginContext.Stage = (int)PipelineStage.PreOperation;
-            pluginContext.PrimaryEntityName = entityName;
-            pluginContext.OrganizationId = Guid.NewGuid();
-            pluginContext.InputParameters["Target"] = new Entity(entityName) { ["name"] = "ACME" };
+            var pluginContext = BuildPluginContext(context, entityName, new Entity(entityName) { ["name"] = "ACME" });
 
-            var plugin = new PluginType(null, null);
-
-            plugin.Execute(BuildServiceProvider(context, pluginContext));
+            _runner.Run(BuildServiceProvider(context, pluginContext));
         }
 
         [TestMethod]
-        public void Execute_NoConfigurationRow_DoesNotThrow()
+        public void Run_NoConfigurationRow_DoesNotThrow()
         {
             var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
             var context = new XrmFakedContext();
             context.Initialize(new List<Entity>());
 
-            var pluginContext = context.GetDefaultPluginContext();
-            pluginContext.MessageName = "Create";
-            pluginContext.Stage = (int)PipelineStage.PreOperation;
-            pluginContext.PrimaryEntityName = entityName;
-            pluginContext.OrganizationId = Guid.NewGuid();
-            pluginContext.InputParameters["Target"] = new Entity(entityName);
+            var pluginContext = BuildPluginContext(context, entityName, new Entity(entityName));
 
-            var plugin = new PluginType(null, null);
-
-            plugin.Execute(BuildServiceProvider(context, pluginContext));
+            _runner.Run(BuildServiceProvider(context, pluginContext));
         }
 
         [TestMethod]
-        public void Execute_MisconfiguredRule_DoesNotLeakConfigurationDetailsToTheUser()
+        public void Run_MisconfiguredRule_DoesNotLeakConfigurationDetailsToTheUser()
         {
             var entityName = "vldtest_" + Guid.NewGuid().ToString("N");
             var context = new XrmFakedContext();
@@ -116,20 +108,19 @@ namespace DevEn.Xrm.EntityValidation.Tests.Plugin
                 CreateConfigurationRow(entityName, "Create", "PreOperation", "name", "ThisRuleTypeDoesNotExist", "Error")
             });
 
-            var pluginContext = context.GetDefaultPluginContext();
-            pluginContext.MessageName = "Create";
-            pluginContext.Stage = (int)PipelineStage.PreOperation;
-            pluginContext.PrimaryEntityName = entityName;
-            pluginContext.OrganizationId = Guid.NewGuid();
-            pluginContext.InputParameters["Target"] = new Entity(entityName);
-
-            var plugin = new PluginType(null, null);
+            var pluginContext = BuildPluginContext(context, entityName, new Entity(entityName));
 
             var exception = Assert.ThrowsException<InvalidPluginExecutionException>(
-                () => plugin.Execute(BuildServiceProvider(context, pluginContext)));
+                () => _runner.Run(BuildServiceProvider(context, pluginContext)));
 
             StringAssert.Contains(exception.Message, "administrator");
             Assert.IsFalse(exception.Message.Contains("ThisRuleTypeDoesNotExist"), "internal configuration details must stay in the trace log");
+        }
+
+        [TestMethod]
+        public void Run_WithoutServiceProvider_Throws()
+        {
+            Assert.ThrowsException<ArgumentNullException>(() => _runner.Run(null));
         }
     }
 }
