@@ -11,6 +11,7 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 | Configuration storage | Out-of-the-box `msdyn_configuration` ("Configuration") table |
 | Built-in rule types | 12 (see [Rule type reference](#rule-type-reference)) |
 | Configuration granularity | One JSON array per target entity, one object per rule (field/message/stage/type/parameters) |
+| Authoring | Excel template + generator driven by `app.config`: fill the sheet, run the tool, get the configuration rows |
 | Missing configuration | Silently skipped (no rules configured = no validation, not an error) |
 | Broken configuration | Fails loudly with a clear error (malformed JSON is a real mistake to fix) |
 | Packaging | Shared project (`.shproj`): the sources compile into your own plugin assembly, no extra DLL to deploy |
@@ -21,6 +22,7 @@ in Dataverse itself, with no entity-specific code and no redeployment required t
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Configuration model](#configuration-model)
+- [Generating the configuration from a spreadsheet](#generating-the-configuration-from-a-spreadsheet)
 - [Rule type reference](#rule-type-reference)
 - [Supported Dataverse messages and pipeline stages](#supported-dataverse-messages-and-pipeline-stages)
 - [Using it in your plugin assembly](#using-it-in-your-plugin-assembly)
@@ -154,8 +156,89 @@ This row would be created with `msdyn_name = "ValidationRules:account"`, using w
 environment allows (Dataverse Web API, XrmToolBox, a Power Automate flow...) — `msdyn_configuration` is
 typically not exposed in a default model-driven app sitemap.
 
-## Rule type reference
+## Generating the configuration from a spreadsheet
 
+Nobody should have to hand-write that JSON. `DevEn.Xrm.EntityValidation.RuleBuilder` is a small console
+app that turns a spreadsheet into ready-to-paste configuration rows — **and generates the row name too**.
+
+Paths live in its `app.config`, so the everyday run takes no arguments at all:
+
+```xml
+<appSettings>
+  <add key="InputWorkbook" value="templates\ValidationRules.Template.xlsx" />
+  <add key="OutputFolder"  value="Validation Rules out" />
+  <add key="OutputFormat"  value="Both" />   <!-- Json | Excel | Both -->
+</appSettings>
+```
+
+Paths are resolved so that the tool behaves the same however it is started — from the repository root, from
+`bin\`, from a shortcut:
+
+- an **absolute** path is taken as it is;
+- a **relative** `InputWorkbook` is looked up in the current directory first, then from the executable's
+  folder upwards; the path actually used is printed, and when nothing matches every location tried is listed;
+- a **relative** `OutputFolder` is created **next to the spreadsheet**, so the generated configuration sits
+  where the rules were written.
+
+```powershell
+# everyday run: reads the configured spreadsheet, writes to the configured folder
+dotnet run --project DevEn.Xrm.EntityValidation.RuleBuilder
+
+# one-off run on another file
+dotnet run --project DevEn.Xrm.EntityValidation.RuleBuilder -- build "C:\temp\rules.xlsx" "C:\temp\out"
+
+# regenerate the empty template (refuses to overwrite without --force)
+dotnet run --project DevEn.Xrm.EntityValidation.RuleBuilder -- template templates\ValidationRules.Template.xlsx --force
+```
+
+Two output formats, picked with `OutputFormat`:
+
+| Format | What lands in the output folder |
+|---|---|
+| `Json` | `ValidationRules.<table>.json` per table, plus `configuration-rows.csv` (`msdyn_name`, `msdyn_value`) to create every row in one import |
+| `Excel` | A copy of the input spreadsheet with three columns appended: `ConfigurationName`, `GeneratedJson` (that line's rule) and `Result` |
+| `Both` | The two of them (default) |
+
+Either way the console lists the exact `msdyn_name` (`ValidationRules:<table>`) and the expected `statecode`
+for each row to create.
+
+**Every rule is checked with the very code that runs in Dataverse.** The generator compiles the shared
+project, so an unknown rule type, a missing parameter, an `Expression` condition that doesn't compile or a
+duplicate `RuleId` are reported with their row number — and nothing is generated until they are fixed:
+
+```
+  warning  Row 14: 'Pattern' is ignored by rule type 'Required'.
+  ERROR    Row 2: unknown rule type 'Requiredd'. Allowed: Required, Regex, Range, ...
+  ERROR    Row 41: Rule opp-closedate (Expression) at 'condition.op': 'equalz' is not a valid operator; use ==, !=, >, >=, < or <=
+```
+
+The review spreadsheet is written **even then**, with the message in the `Result` column and the line
+highlighted: the mistake gets fixed where the rules are written, not in a console log.
+
+### The template
+
+`templates/ValidationRules.Template.xlsx` is meant to be shared as is:
+
+| Sheet | Content |
+|---|---|
+| `Rules` | One line per rule, 29 columns: the ones that end up in the configuration plus a free `Notes` column |
+| `Reference` | How to fill it in, what each rule type needs, what each column means |
+| `Lists` | Hidden: the values backing the drop-downs |
+
+It comes with **five worked examples per rule type** (60 lines), and the sheet guides the operator:
+
+- drop-downs on `Message`, `Stage`, `RuleType`, `Operator`, `WhenOperator`, `ThenRuleType`, `IsActive`,
+  `CaseSensitive` and `ExpectedState`;
+- pick the `RuleType` first: every column that rule type **doesn't use turns grey**, and every column it
+  **needs but that is still empty turns amber**, so a half-filled line is visible at a glance;
+- the same happens on `Entity`, `Message`, `Stage` and `RuleType` as soon as a line has any content;
+- each header carries a comment explaining the column.
+
+Columns are matched by **header name**, so extra columns of your own are simply ignored, and `Notes` never
+ends up in the configuration. Columns holding lists (`Values`, `Fields`, `ScopeFields`) use `;` as the
+separator.
+
+## Rule type reference
 Unless noted otherwise, a rule whose target field is `null`/absent is treated as **satisfied** (`true`):
 compose with a separate `Required` rule on the same field to also enforce its presence.
 
@@ -697,6 +780,9 @@ DevEn.Xrm.EntityValidation/                Shared project (no assembly of its ow
   Engine/                                  ValidationEngine
   Execution/                               ValidationChainRunner, OnDemandValidationRunner, RecordDataReader, LocalPluginContext, TargetEntityResolver
 DevEn.Xrm.EntityValidation.Tests/          MSTest + FakeXrmEasy test project, mirroring the folder layout above
+DevEn.Xrm.EntityValidation.RuleBuilder/    Console app: writes the rule template and turns it into configuration rows (paths in app.config)
+templates/                                 ValidationRules.Template.xlsx, the spreadsheet to hand to whoever writes the rules
+templates/Validation Rules out/            Generated configuration, next to the spreadsheet it comes from (git-ignored)
 ```
 
 The test project consumes the shared project exactly the way a plugin assembly does (a single
@@ -723,6 +809,13 @@ Test project only:
 | MSTest.TestAdapter / MSTest.TestFramework | 3.6.4 |
 | FakeXrmEasy.9 | 1.58.1 (free/MIT v1.x line, .NET Framework compatible) |
 
+RuleBuilder only:
+
+| Component | Version |
+|---|---|
+| Target framework | .NET Framework 4.7.2 (`net472`) |
+| ClosedXML | 0.102.3 (MIT) |
+
 ## Building and testing
 
 From the repository root:
@@ -733,5 +826,6 @@ dotnet test DevEn.Xrm.EntityValidation.slnx
 ```
 
 A shared project is never built on its own: the sources are compiled (and therefore type-checked) by the
-test project, which is the only assembly the solution produces. No additional runtime is needed beyond the
-.NET Framework 4.6.2 developer pack and the .NET SDK used to drive `dotnet build`/`dotnet test`.
+test project and by the RuleBuilder, which are the two assemblies the solution produces. No additional
+runtime is needed beyond the .NET Framework 4.6.2 developer pack and the .NET SDK used to drive
+`dotnet build`/`dotnet test`.

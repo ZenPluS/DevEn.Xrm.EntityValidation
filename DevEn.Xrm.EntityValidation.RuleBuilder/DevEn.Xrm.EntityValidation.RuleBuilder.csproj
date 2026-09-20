@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Same .NET Framework family as the plugin code it imports, so the generator validates rules with
+         the very classes that will run in Dataverse. -->
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>DevEn.Xrm.EntityValidation.RuleBuilder</RootNamespace>
+    <AssemblyName>DevEn.Xrm.EntityValidation.RuleBuilder</AssemblyName>
+  </PropertyGroup>
+
+  <Import Project="..\DevEn.Xrm.EntityValidation\DevEn.Xrm.EntityValidation.projitems" Label="Shared" />
+
+  <ItemGroup>
+    <Reference Include="System.Configuration" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="ClosedXML" Version="0.102.3" />
+  </ItemGroup>
+
+</Project>

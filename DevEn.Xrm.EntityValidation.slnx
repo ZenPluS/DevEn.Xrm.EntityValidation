@@ -1,7 +1,9 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path="README.md" />
+    <File Path="templates/ValidationRules.Template.xlsx" />
   </Folder>
+  <Project Path="DevEn.Xrm.EntityValidation.RuleBuilder/DevEn.Xrm.EntityValidation.RuleBuilder.csproj" />
   <Project Path="DevEn.Xrm.EntityValidation.Tests/DevEn.Xrm.EntityValidation.Tests.csproj" />
   <Project Path="DevEn.Xrm.EntityValidation/DevEn.Xrm.EntityValidation.shproj" />
 </Solution>
